@@ -1,0 +1,16 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug in Exponent",
+      "type": "reactnative",
+      "request": "launch",
+      "platform": "exponent"
+    },
+    {
+      "name": "Attach to packager",
+      "type": "reactnative",
+      "request": "attach"
+    }
+  ]
+}
