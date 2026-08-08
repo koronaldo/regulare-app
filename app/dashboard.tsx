@@ -100,7 +100,7 @@ export default function DashboardScreen() {
   function sair() {
     limparCredenciais();
     cancelarVerificacaoPeriodica();
-    router.replace('/');
+    router.replace('/login');
   }
 
   const labelAba = ABAS.find((a) => a.valor === situacao)?.label ?? '';

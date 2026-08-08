@@ -17,6 +17,19 @@ export async function listaSinistrosLocais(): Promise<string> {
   }
 }
 
+/** Ids de sinistro já salvos localmente, pra descobrir quais vieram novos num login. */
+export async function idsSinistrosLocais(): Promise<Set<number>> {
+  try {
+    const db = await getDb();
+    const linhas = await db.getAllAsync<{ id_sinistro: number }>(
+      'select id_sinistro from sinimob where id_sinistro is not null',
+    );
+    return new Set(linhas.map((l) => l.id_sinistro));
+  } catch {
+    return new Set();
+  }
+}
+
 export type SituacaoSinistro = 'P' | 'A' | 'T';
 
 export interface SinistroResumo {

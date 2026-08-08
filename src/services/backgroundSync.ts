@@ -1,3 +1,4 @@
+import { Platform } from 'react-native';
 import * as BackgroundTask from 'expo-background-task';
 import * as Notifications from 'expo-notifications';
 import * as TaskManager from 'expo-task-manager';
@@ -20,15 +21,8 @@ TaskManager.defineTask(NOME_TAREFA, async () => {
   try {
     const novos = await verificarNovosSinistros();
     console.log(`[backgroundSync] verificação rodou, ${novos.length} sinistro(s) novo(s)`);
-    for (const sinistro of novos) {
-      await Notifications.scheduleNotificationAsync({
-        content: {
-          title: 'Novo sinistro',
-          body: `${sinistro.nro_sinistro} — ${sinistro.nm_segurado}`,
-          vibrate: [0, 250, 250, 250],
-        },
-        trigger: null,
-      });
+    if (novos.length > 0) {
+      await notificarSinistrosNovos(novos.length);
     }
     return BackgroundTask.BackgroundTaskResult.Success;
   } catch (erro) {
@@ -36,6 +30,27 @@ TaskManager.defineTask(NOME_TAREFA, async () => {
     return BackgroundTask.BackgroundTaskResult.Failed;
   }
 });
+
+/**
+ * Notifica (com vibração) que existem processos novos — usada tanto pela checagem
+ * periódica em segundo plano quanto pelo login (ver auth.ts), com app ativo ou minimizado:
+ * uma notificação local aparece nos dois casos, só a tarefa periódica em si (o agendamento
+ * de 15 em 15 min) que não roda com o app em primeiro plano.
+ */
+export async function notificarSinistrosNovos(quantidade: number): Promise<void> {
+  await Notifications.scheduleNotificationAsync({
+    content: {
+      title: 'Novos processos',
+      body:
+        quantidade === 1
+          ? 'Você possui um novo processo.'
+          : `Você possui ${quantidade} novos processos.`,
+      vibrate: [0, 250, 250, 250],
+      ...(Platform.OS === 'android' ? { channelId: CANAL_ANDROID } : null),
+    },
+    trigger: null,
+  });
+}
 
 /** Pede permissão de notificação e cria o canal Android com vibração. Chamar na abertura do app. */
 export async function configurarNotificacoes(): Promise<void> {
@@ -67,10 +82,4 @@ export async function cancelarVerificacaoPeriodica(): Promise<void> {
   if (!jaRegistrada) return;
 
   await BackgroundTask.unregisterTaskAsync(NOME_TAREFA);
-}
-
-/** TESTE: força o worker a rodar agora, sem esperar o SO decidir o horário. */
-export async function testarVerificacaoAgora(): Promise<void> {
-  const executou = await BackgroundTask.triggerTaskWorkerForTestingAsync();
-  console.log('[teste] triggerTaskWorkerForTestingAsync executou:', executou);
 }

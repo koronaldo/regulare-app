@@ -77,7 +77,9 @@
       "Bash(curl -s -o /tmp/claude-1000/-home-ronaldo-projetos-regulare-app/e99ba79b-e004-4e00-b33e-e91ec9761bbc/scratchpad/bundle_dl.log -w \"bundle: %{http_code}\\\\n\" \"http://localhost:8081/node_modules/expo-router/entry.bundle?platform=android&dev=true\")",
       "Bash(xargs cat)",
       "Bash(mkdir -p /tmp/claude-1000/-home-ronaldo-projetos-regulare-app/e99ba79b-e004-4e00-b33e-e91ec9761bbc/scratchpad)",
-      "Bash(nohup npx expo start --web)"
+      "Bash(nohup npx expo start --web)",
+      "Bash(adb logcat *)",
+      "Bash(curl -s -o /dev/null -w \"Metro HTTP status: %{http_code}\\\\n\" http://localhost:8081 --max-time 3)"
     ],
     "additionalDirectories": [
       "/home/ronaldo/android-tools"

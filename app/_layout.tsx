@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { Stack } from 'expo-router';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
-import { configurarNotificacoes, registrarVerificacaoPeriodica, testarVerificacaoAgora } from '../src/services/backgroundSync';
+import { configurarNotificacoes, registrarVerificacaoPeriodica } from '../src/services/backgroundSync';
 import { lerCredenciais } from '../src/services/credenciais';
 import { inicializarBancoLocal } from '../src/db/schema';
 
@@ -24,11 +24,6 @@ export default function RootLayout() {
       .catch((error) => {
         console.log('Erro reregistrando verificação periódica:', error);
       });
-
-    // TESTE TEMPORÁRIO: força a tarefa a rodar agora, sem esperar o SO decidir o horário.
-    testarVerificacaoAgora().catch((error) => {
-      console.log('[teste] falha forçando verificação:', error);
-    });
   }, []);
 
   return (

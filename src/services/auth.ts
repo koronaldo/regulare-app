@@ -1,8 +1,8 @@
-import { registrarVerificacaoPeriodica } from './backgroundSync';
+import { notificarSinistrosNovos, registrarVerificacaoPeriodica } from './backgroundSync';
 import { prepararSenha, salvarCredenciais } from './credenciais';
 import { importarDadosEstaticos, importarDadosLogin, precisaDadosEstaticos } from '../db/importLogin';
 import { inicializarBancoLocal } from '../db/schema';
-import { listaSinistrosLocais } from '../db/sinistros';
+import { idsSinistrosLocais, listaSinistrosLocais } from '../db/sinistros';
 import { resumoBancoLocal } from '../db/status';
 
 function requireApiUrl(): string {
@@ -104,10 +104,19 @@ export async function autenticarLegado(usuario: string, senha: string): Promise<
 
   if (json?.result === true) {
     await inicializarBancoLocal();
+    const idsAntes = await idsSinistrosLocais();
     await importarDadosLogin(json, usuario);
     await sincronizarDadosEstaticosSeNecessario();
     await salvarCredenciais({ usuario, senhaEnvio });
     await registrarVerificacaoPeriodica();
+
+    const sinistrosResposta: Array<{ id_sinistro: number }> = Array.isArray(json.dados_sini) ? json.dados_sini : [];
+    const novos = sinistrosResposta.filter((s) => !idsAntes.has(Number(s.id_sinistro)));
+    console.log(`[auth] sinistros novos neste login: ${novos.length}`);
+    if (novos.length > 0) {
+      await notificarSinistrosNovos(novos.length);
+    }
+
     const { tabelas, linhasTotal } = await resumoBancoLocal();
 
     return {
