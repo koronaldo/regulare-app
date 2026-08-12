@@ -288,6 +288,13 @@ export default function VideosScreen() {
             {cabecalho.segurado} · Sinistro {cabecalho.sinistro}
           </Text>
         </View>
+        <Pressable
+          onPress={() => router.push({ pathname: '/sinistro/[id]', params: { id: String(idSinistro) } })}
+          hitSlop={10}
+          style={styles.botaoVoltar}
+        >
+          <Ionicons name="grid-outline" size={22} color="#fff" />
+        </Pressable>
       </View>
 
       <View style={styles.segmentado}>

@@ -75,7 +75,7 @@ export async function buscarItensApolice(idSinistro: number): Promise<ItemApolic
        sa.descricao, sa.confere, sa.complemento, sa.id_estado, sa.id_cidade, sa.id_estado_ori, sa.id_cidade_ori
      from apolice_item ai
      left join sinistro_apolice sa on ai.id_item = sa.id_item and sa.id_sinistro = ?
-     order by ai.ordem_item`,
+     order by cast(ai.ordem_item as integer)`,
     [idSinistro],
   );
 

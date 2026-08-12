@@ -1,9 +1,21 @@
-import { useCallback, useState } from 'react';
-import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useRef, useState, type RefObject } from 'react';
+import {
+  ActivityIndicator,
+  findNodeHandle,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  UIManager,
+  View,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as Location from 'expo-location';
 
 import { Campo } from '../../../src/components/form/Campo';
 import { Interruptor } from '../../../src/components/form/Interruptor';
@@ -43,6 +55,7 @@ import {
 } from '../../../src/db/informacoes';
 import { buscarSinistroPorId, listarCidadesPorEstado, listarEstados } from '../../../src/db/sinistros';
 import { mostrarAlerta } from '../../../src/utils/alerta';
+import { paraCoordenadasGrau } from '../../../src/utils/coordenadas';
 
 interface ValorItemApolice {
   descricao: string;
@@ -215,6 +228,8 @@ export default function InformacoesScreen() {
   const [itens, setItens] = useState<ItemApolice[]>([]);
   const [valores, setValores] = useState<Record<number, ValorItemApolice>>({});
   const [salvandoApolice, setSalvandoApolice] = useState(false);
+  const [erroItem, setErroItem] = useState<{ idItem: number; mensagem: string } | null>(null);
+  const refsItens = useRef<Record<number, View | null>>({});
 
   const [estados, setEstados] = useState<OpcaoSelecao[]>([]);
   const [cidadesRef, setCidadesRef] = useState<Record<number, OpcaoSelecao[]>>({});
@@ -223,6 +238,53 @@ export default function InformacoesScreen() {
   const [benfeitorias, setBenfeitorias] = useState<Benfeitoria[]>([]);
   const [formBenfeitoria, setFormBenfeitoria] = useState<FormBenfeitoria | null>(null);
   const [salvandoBenfeitoria, setSalvandoBenfeitoria] = useState(false);
+  const [erroBenfeitoria, setErroBenfeitoria] = useState<{ campo: keyof FormBenfeitoria; mensagem: string } | null>(
+    null,
+  );
+  const [buscandoLocalizacao, setBuscandoLocalizacao] = useState(false);
+
+  const scrollRef = useRef<ScrollView>(null);
+  const refNmBenfeito = useRef<TextInput>(null);
+  const refIdOcupacao = useRef<View>(null);
+  const refIdEstrutura = useRef<View>(null);
+  const refIdParede = useRef<View>(null);
+  const refIdTipocobertura = useRef<View>(null);
+  const refIdEsquadria = useRef<View>(null);
+
+  function erroDoCampoBenfeitoria(campo: keyof FormBenfeitoria): string | undefined {
+    return erroBenfeitoria?.campo === campo ? erroBenfeitoria.mensagem : undefined;
+  }
+
+  function focarCampoBenfeitoriaComErro(campo: keyof FormBenfeitoria, mensagem: string) {
+    setErroBenfeitoria({ campo, mensagem });
+
+    const refsPorCampo: Partial<Record<keyof FormBenfeitoria, RefObject<TextInput | View | null>>> = {
+      nm_benfeito: refNmBenfeito,
+      id_ocupacao: refIdOcupacao,
+      id_estrutura: refIdEstrutura,
+      id_parede: refIdParede,
+      id_tipocobertura: refIdTipocobertura,
+      id_esquadria: refIdEsquadria,
+    };
+
+    const el = refsPorCampo[campo]?.current;
+    const elHandle = el ? findNodeHandle(el) : null;
+    const scrollHandle = scrollRef.current ? findNodeHandle(scrollRef.current) : null;
+
+    if (elHandle && scrollHandle) {
+      UIManager.measureLayout(
+        elHandle,
+        scrollHandle,
+        () => {},
+        (_x, y) => {
+          scrollRef.current?.scrollTo({ y: Math.max(y - 24, 0), animated: true });
+        },
+      );
+    }
+    if (el && 'focus' in el && typeof el.focus === 'function') {
+      setTimeout(() => el.focus(), 400);
+    }
+  }
 
   const [opcoesOcupacao, setOpcoesOcupacao] = useState<OpcaoSelecao[]>([]);
   const [opcoesEstrutura, setOpcoesEstrutura] = useState<OpcaoSelecao[]>([]);
@@ -321,6 +383,53 @@ export default function InformacoesScreen() {
 
   function atualizarValorItem(idItem: number, patch: Partial<ValorItemApolice>) {
     setValores((atual) => ({ ...atual, [idItem]: { ...(atual[idItem] ?? VALOR_ITEM_VAZIO), ...patch } }));
+    setErroItem((atual) => (atual?.idItem === idItem ? null : atual));
+  }
+
+  function validarInformacoes(): { idItem: number; mensagem: string } | null {
+    for (const item of itens) {
+      const valor = valores[item.id_item] ?? VALOR_ITEM_VAZIO;
+
+      if (item.conferencia) {
+        if (valor.confere == null) return { idItem: item.id_item, mensagem: 'Marque se confere (Sim ou Não)' };
+        if (valor.confere === false) {
+          if (usaTextoLivre(item) && !valor.complemento.trim()) {
+            return { idItem: item.id_item, mensagem: 'Informe o que foi encontrado' };
+          }
+          if (usaCidade(item) && !valor.id_cidade_ori) {
+            return { idItem: item.id_item, mensagem: 'Informe a cidade encontrada' };
+          }
+        }
+        continue;
+      }
+
+      // Sem opção Sim/Não pra esse item: o campo de valor em si vira obrigatório.
+      const temLista = !!item.lista_selecao;
+      if (temLista && !valor.descricao) return { idItem: item.id_item, mensagem: 'Selecione um valor' };
+      if (!temLista && usaTextoLivre(item) && !valor.descricao.trim()) {
+        return { idItem: item.id_item, mensagem: 'Preencha o valor' };
+      }
+      if (usaCidade(item) && !valor.id_cidade) return { idItem: item.id_item, mensagem: 'Selecione a cidade' };
+    }
+    return null;
+  }
+
+  function focarItemComErro(idItem: number, mensagem: string) {
+    setErroItem({ idItem, mensagem });
+
+    const el = refsItens.current[idItem];
+    const elHandle = el ? findNodeHandle(el) : null;
+    const scrollHandle = scrollRef.current ? findNodeHandle(scrollRef.current) : null;
+    if (elHandle && scrollHandle) {
+      UIManager.measureLayout(
+        elHandle,
+        scrollHandle,
+        () => {},
+        (_x, y) => {
+          scrollRef.current?.scrollTo({ y: Math.max(y - 24, 0), animated: true });
+        },
+      );
+    }
   }
 
   async function mudarEstadoRefItem(idItem: number, uf: string) {
@@ -338,23 +447,12 @@ export default function InformacoesScreen() {
 
   /** Porta de GravarItemApolices (cadinformacoes_def.js). */
   async function salvarInformacoes() {
-    for (const item of itens) {
-      const valor = valores[item.id_item] ?? VALOR_ITEM_VAZIO;
-      if (item.conferencia && valor.confere == null) {
-        mostrarAlerta('Campos pendentes', 'Existe opções não conferidas.');
-        return;
-      }
-      if (item.conferencia && valor.confere === false) {
-        if (usaTextoLivre(item) && !valor.complemento.trim()) {
-          mostrarAlerta('Campos pendentes', 'Existem itens marcados como não conferido e não preenchidos.');
-          return;
-        }
-        if (usaCidade(item) && !valor.id_cidade_ori) {
-          mostrarAlerta('Campos pendentes', 'Existem itens marcados como não conferido e não preenchidos.');
-          return;
-        }
-      }
+    const erro = validarInformacoes();
+    if (erro) {
+      focarItemComErro(erro.idItem, erro.mensagem);
+      return;
     }
+    setErroItem(null);
 
     const respostas: RespostaItemApolice[] = itens.map((item) => {
       const valor = valores[item.id_item] ?? VALOR_ITEM_VAZIO;
@@ -382,45 +480,60 @@ export default function InformacoesScreen() {
   }
 
   function novaBenfeitoria() {
+    setErroBenfeitoria(null);
     setFormBenfeitoria(FORM_BENFEITORIA_VAZIO);
   }
 
   function editarBenfeitoria(b: Benfeitoria) {
+    setErroBenfeitoria(null);
     setFormBenfeitoria(formInicialBenfeitoria(b));
   }
 
   function atualizarFormBenfeitoria<K extends keyof FormBenfeitoria>(campo: K, valor: FormBenfeitoria[K]) {
     setFormBenfeitoria((atual) => (atual ? { ...atual, [campo]: valor } : atual));
+    setErroBenfeitoria((atual) => (atual?.campo === campo ? null : atual));
+  }
+
+  /** Preenche Latitude/Longitude com a localização atual, em graus/minutos/segundos (porta de getDms/ddToDms). */
+  async function preencherCoordenadasAtuais() {
+    setBuscandoLocalizacao(true);
+    try {
+      const permissao = await Location.requestForegroundPermissionsAsync();
+      if (!permissao.granted) {
+        mostrarAlerta('Localização', 'Permissão de localização não concedida.');
+        return;
+      }
+      const posicao = await Location.getCurrentPositionAsync({});
+      const grau = paraCoordenadasGrau(posicao.coords.latitude, posicao.coords.longitude);
+      atualizarFormBenfeitoria('coord_lat', grau.latitude);
+      atualizarFormBenfeitoria('coord_long', grau.longitude);
+    } catch {
+      mostrarAlerta('Localização', 'Erro identificando o local. Verifique se o GPS está ativado.');
+    } finally {
+      setBuscandoLocalizacao(false);
+    }
+  }
+
+  function validarBenfeitoria(f: FormBenfeitoria): { campo: keyof FormBenfeitoria; mensagem: string } | null {
+    if (!f.id_ocupacao) return { campo: 'id_ocupacao', mensagem: 'Informe a ocupação' };
+    if (!f.nm_benfeito.trim()) return { campo: 'nm_benfeito', mensagem: 'Informe o nome' };
+    if (!f.id_estrutura) return { campo: 'id_estrutura', mensagem: 'Informe a estrutura' };
+    if (!f.id_parede) return { campo: 'id_parede', mensagem: 'Informe a parede' };
+    if (!f.id_tipocobertura) return { campo: 'id_tipocobertura', mensagem: 'Informe o tipo de cobertura' };
+    if (!f.id_esquadria) return { campo: 'id_esquadria', mensagem: 'Informe o tipo de esquadria' };
+    return null;
   }
 
   /** Porta de GravarBenfeitoria + AtualizaBenfeitoria (cadinformacoes_def.js). */
   async function salvarFormBenfeitoria() {
     if (!formBenfeitoria) return;
 
-    if (!formBenfeitoria.id_ocupacao) {
-      mostrarAlerta('Campo obrigatório', 'Informe a ocupação.');
+    const erro = validarBenfeitoria(formBenfeitoria);
+    if (erro) {
+      focarCampoBenfeitoriaComErro(erro.campo, erro.mensagem);
       return;
     }
-    if (!formBenfeitoria.nm_benfeito.trim()) {
-      mostrarAlerta('Campo obrigatório', 'Informe o nome.');
-      return;
-    }
-    if (!formBenfeitoria.id_estrutura) {
-      mostrarAlerta('Campo obrigatório', 'Informe a estrutura.');
-      return;
-    }
-    if (!formBenfeitoria.id_parede) {
-      mostrarAlerta('Campo obrigatório', 'Informe a parede.');
-      return;
-    }
-    if (!formBenfeitoria.id_tipocobertura) {
-      mostrarAlerta('Campo obrigatório', 'Informe o tipo de cobertura.');
-      return;
-    }
-    if (!formBenfeitoria.id_esquadria) {
-      mostrarAlerta('Campo obrigatório', 'Informe o tipo de esquadria.');
-      return;
-    }
+    setErroBenfeitoria(null);
 
     const dados: DadosBenfeitoria = {
       construcao: formBenfeitoria.construcao,
@@ -582,9 +695,16 @@ export default function InformacoesScreen() {
             {cabecalho.segurado} · Sinistro {cabecalho.sinistro}
           </Text>
         </View>
+        <Pressable
+          onPress={() => router.push({ pathname: '/sinistro/[id]', params: { id: String(idSinistro) } })}
+          hitSlop={10}
+          style={styles.botaoVoltar}
+        >
+          <Ionicons name="grid-outline" size={22} color="#fff" />
+        </Pressable>
       </View>
 
-      <ScrollView contentContainerStyle={styles.conteudo} keyboardShouldPersistTaps="handled">
+      <ScrollView ref={scrollRef} contentContainerStyle={styles.conteudo} keyboardShouldPersistTaps="handled">
         <Text style={styles.tituloSecao}>INFORMAÇÕES</Text>
 
         {tipoApolice !== 'PRE' && (
@@ -607,95 +727,110 @@ export default function InformacoesScreen() {
                   .map((v) => ({ valor: v, label: v }))
               : [];
 
-            return (
-              <Secao key={item.id_item} titulo={item.descricao_item}>
-                {opcoesLista.length > 0 && (
-                  <Selecao
-                    label="Valor"
-                    valor={valor.descricao}
-                    opcoes={opcoesLista}
-                    onChange={(v) => atualizarValorItem(item.id_item, { descricao: v })}
-                  />
-                )}
-                {opcoesLista.length === 0 && usaTextoLivre(item) && (
-                  <Campo
-                    label="Valor"
-                    value={valor.descricao}
-                    onChangeText={(v) => atualizarValorItem(item.id_item, { descricao: v })}
-                  />
-                )}
-                {usaCidade(item) && (
-                  <>
-                    <Selecao
-                      label="UF"
-                      valor={valor.id_estado}
-                      opcoes={estados}
-                      onChange={(uf) => mudarEstadoRefItem(item.id_item, uf)}
-                    />
-                    <Selecao
-                      label="Cidade"
-                      valor={valor.id_cidade}
-                      opcoes={cidadesRef[item.id_item] ?? []}
-                      onChange={(v) => atualizarValorItem(item.id_item, { id_cidade: v })}
-                    />
-                  </>
-                )}
+            const erroDesteItem = erroItem?.idItem === item.id_item ? erroItem.mensagem : undefined;
 
-                {item.conferencia && (
-                  <>
-                    <Text style={styles.labelConfere}>
-                      Confere? <Text style={styles.asteriscoConfere}>*</Text>
-                    </Text>
-                    <View style={styles.linhaConfere}>
-                      <Pressable
-                        style={styles.opcaoConfere}
-                        onPress={() => atualizarValorItem(item.id_item, { confere: true })}
-                      >
-                        <Ionicons
-                          name={valor.confere === true ? 'checkbox' : 'square-outline'}
-                          size={22}
-                          color="#1c3d5a"
-                        />
-                        <Text style={styles.opcaoConfereTexto}>Sim</Text>
-                      </Pressable>
-                      <Pressable
-                        style={styles.opcaoConfere}
-                        onPress={() => atualizarValorItem(item.id_item, { confere: false })}
-                      >
-                        <Ionicons
-                          name={valor.confere === false ? 'checkbox' : 'square-outline'}
-                          size={22}
-                          color="#1c3d5a"
-                        />
-                        <Text style={styles.opcaoConfereTexto}>Não</Text>
-                      </Pressable>
-                    </View>
-                    {valor.confere === false && usaTextoLivre(item) && (
-                      <Campo
-                        label="O que foi encontrado"
-                        value={valor.complemento}
-                        onChangeText={(v) => atualizarValorItem(item.id_item, { complemento: v })}
+            return (
+              <View key={item.id_item} ref={(el) => { refsItens.current[item.id_item] = el; }}>
+                <Secao titulo={item.descricao_item}>
+                  {opcoesLista.length > 0 && (
+                    <Selecao
+                      label="Valor"
+                      valor={valor.descricao}
+                      opcoes={opcoesLista}
+                      onChange={(v) => atualizarValorItem(item.id_item, { descricao: v })}
+                      obrigatorio={!item.conferencia}
+                      erro={erroDesteItem}
+                    />
+                  )}
+                  {opcoesLista.length === 0 && usaTextoLivre(item) && (
+                    <Campo
+                      label="Valor"
+                      value={valor.descricao}
+                      onChangeText={(v) => atualizarValorItem(item.id_item, { descricao: v })}
+                      obrigatorio={!item.conferencia}
+                      erro={erroDesteItem}
+                    />
+                  )}
+                  {usaCidade(item) && (
+                    <>
+                      <Selecao
+                        label="UF"
+                        valor={valor.id_estado}
+                        opcoes={estados}
+                        onChange={(uf) => mudarEstadoRefItem(item.id_item, uf)}
                       />
-                    )}
-                    {valor.confere === false && usaCidade(item) && (
-                      <>
-                        <Selecao
-                          label="UF encontrado"
-                          valor={valor.id_estado_ori}
-                          opcoes={estados}
-                          onChange={(uf) => mudarEstadoOriItem(item.id_item, uf)}
+                      <Selecao
+                        label="Cidade"
+                        valor={valor.id_cidade}
+                        opcoes={cidadesRef[item.id_item] ?? []}
+                        onChange={(v) => atualizarValorItem(item.id_item, { id_cidade: v })}
+                        obrigatorio={!item.conferencia}
+                        erro={erroDesteItem}
+                      />
+                    </>
+                  )}
+
+                  {item.conferencia && (
+                    <>
+                      <Text style={styles.labelConfere}>
+                        Confere? <Text style={styles.asteriscoConfere}>*</Text>
+                      </Text>
+                      <View style={styles.linhaConfere}>
+                        <Pressable
+                          style={styles.opcaoConfere}
+                          onPress={() => atualizarValorItem(item.id_item, { confere: true })}
+                        >
+                          <Ionicons
+                            name={valor.confere === true ? 'checkbox' : 'square-outline'}
+                            size={22}
+                            color="#1c3d5a"
+                          />
+                          <Text style={styles.opcaoConfereTexto}>Sim</Text>
+                        </Pressable>
+                        <Pressable
+                          style={styles.opcaoConfere}
+                          onPress={() => atualizarValorItem(item.id_item, { confere: false })}
+                        >
+                          <Ionicons
+                            name={valor.confere === false ? 'checkbox' : 'square-outline'}
+                            size={22}
+                            color="#1c3d5a"
+                          />
+                          <Text style={styles.opcaoConfereTexto}>Não</Text>
+                        </Pressable>
+                      </View>
+                      {valor.confere == null && erroDesteItem && <Text style={styles.erroConfereTexto}>{erroDesteItem}</Text>}
+                      {valor.confere === false && usaTextoLivre(item) && (
+                        <Campo
+                          label="O que foi encontrado"
+                          value={valor.complemento}
+                          onChangeText={(v) => atualizarValorItem(item.id_item, { complemento: v })}
+                          obrigatorio
+                          erro={erroDesteItem}
                         />
-                        <Selecao
-                          label="Cidade encontrada"
-                          valor={valor.id_cidade_ori}
-                          opcoes={cidadesOri[item.id_item] ?? []}
-                          onChange={(v) => atualizarValorItem(item.id_item, { id_cidade_ori: v })}
-                        />
-                      </>
-                    )}
-                  </>
-                )}
-              </Secao>
+                      )}
+                      {valor.confere === false && usaCidade(item) && (
+                        <>
+                          <Selecao
+                            label="UF encontrado"
+                            valor={valor.id_estado_ori}
+                            opcoes={estados}
+                            onChange={(uf) => mudarEstadoOriItem(item.id_item, uf)}
+                          />
+                          <Selecao
+                            label="Cidade encontrada"
+                            valor={valor.id_cidade_ori}
+                            opcoes={cidadesOri[item.id_item] ?? []}
+                            onChange={(v) => atualizarValorItem(item.id_item, { id_cidade_ori: v })}
+                            obrigatorio
+                            erro={erroDesteItem}
+                          />
+                        </>
+                      )}
+                    </>
+                  )}
+                </Secao>
+              </View>
             );
           })}
 
@@ -723,18 +858,28 @@ export default function InformacoesScreen() {
 
         {formBenfeitoria && (
           <Secao titulo={formBenfeitoria.id_sinibenfe ? 'Editar Benfeitoria' : 'Nova Benfeitoria'}>
+            {erroBenfeitoria && (
+              <View style={styles.bannerErro}>
+                <Ionicons name="alert-circle" size={20} color="#b3261e" />
+                <Text style={styles.bannerErroTexto}>{erroBenfeitoria.mensagem}</Text>
+              </View>
+            )}
             <Campo
+              ref={refNmBenfeito}
               label="Descrição"
               obrigatorio
+              erro={erroDoCampoBenfeitoria('nm_benfeito')}
               value={formBenfeitoria.nm_benfeito}
               onChangeText={(v) => atualizarFormBenfeitoria('nm_benfeito', v)}
             />
             <Selecao
+              ref={refIdOcupacao}
               label="Ocupação"
               valor={formBenfeitoria.id_ocupacao}
               opcoes={opcoesOcupacao}
               onChange={(v) => atualizarFormBenfeitoria('id_ocupacao', v)}
               obrigatorio
+              erro={erroDoCampoBenfeitoria('id_ocupacao')}
             />
             <Campo
               label="Área"
@@ -750,33 +895,55 @@ export default function InformacoesScreen() {
             />
             <Interruptor label="Danos?" valor={formBenfeitoria.danos} onChange={(v) => atualizarFormBenfeitoria('danos', v)} />
             <Selecao
+              ref={refIdEstrutura}
               label="Estrutura"
               valor={formBenfeitoria.id_estrutura}
               opcoes={opcoesEstrutura}
               onChange={(v) => atualizarFormBenfeitoria('id_estrutura', v)}
               obrigatorio
+              erro={erroDoCampoBenfeitoria('id_estrutura')}
             />
             <Selecao
+              ref={refIdParede}
               label="Parede"
               valor={formBenfeitoria.id_parede}
               opcoes={opcoesParede}
               onChange={(v) => atualizarFormBenfeitoria('id_parede', v)}
               obrigatorio
+              erro={erroDoCampoBenfeitoria('id_parede')}
             />
             <Selecao
+              ref={refIdTipocobertura}
               label="Tipo Cobertura"
               valor={formBenfeitoria.id_tipocobertura}
               opcoes={opcoesTipoCobertura}
               onChange={(v) => atualizarFormBenfeitoria('id_tipocobertura', v)}
               obrigatorio
+              erro={erroDoCampoBenfeitoria('id_tipocobertura')}
             />
             <Selecao
+              ref={refIdEsquadria}
               label="Esquadria"
               valor={formBenfeitoria.id_esquadria}
               opcoes={opcoesEsquadria}
               onChange={(v) => atualizarFormBenfeitoria('id_esquadria', v)}
               obrigatorio
+              erro={erroDoCampoBenfeitoria('id_esquadria')}
             />
+            <Pressable
+              style={styles.botaoLocalizacao}
+              onPress={preencherCoordenadasAtuais}
+              disabled={buscandoLocalizacao}
+            >
+              {buscandoLocalizacao ? (
+                <ActivityIndicator color="#1c3d5a" />
+              ) : (
+                <>
+                  <Ionicons name="location-outline" size={18} color="#1c3d5a" />
+                  <Text style={styles.botaoLocalizacaoTexto}>Usar localização atual</Text>
+                </>
+              )}
+            </Pressable>
             <Campo
               label="Latitude"
               value={formBenfeitoria.coord_lat}
@@ -977,6 +1144,23 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f4f6f8',
   },
+  bannerErro: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: '#fdecea',
+    borderWidth: 1,
+    borderColor: '#f5c6c2',
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    marginBottom: 14,
+  },
+  bannerErroTexto: {
+    flex: 1,
+    color: '#8f2b23',
+    fontSize: 13,
+  },
   centro: {
     flex: 1,
     alignItems: 'center',
@@ -1031,6 +1215,11 @@ const styles = StyleSheet.create({
   },
   asteriscoConfere: {
     color: '#b3261e',
+  },
+  erroConfereTexto: {
+    color: '#d32f2f',
+    fontSize: 12,
+    marginTop: 4,
   },
   linhaConfere: {
     flexDirection: 'row',
@@ -1088,6 +1277,22 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     paddingVertical: 12,
     marginBottom: 10,
+  },
+  botaoLocalizacao: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#eef2f5',
+    borderRadius: 10,
+    paddingVertical: 12,
+    marginTop: 4,
+    marginBottom: 12,
+  },
+  botaoLocalizacaoTexto: {
+    color: '#1c3d5a',
+    fontWeight: '700',
+    fontSize: 13,
   },
   botaoAdicionarTexto: {
     color: '#1c3d5a',

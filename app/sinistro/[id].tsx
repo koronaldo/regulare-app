@@ -145,7 +145,21 @@ export default function SinistroScreen() {
       return;
     }
 
+    if (chave === 'preliminar') {
+      router.push({ pathname: '/sinistro/[id]/atas', params: { id: String(idSinistro) } });
+      return;
+    }
+
+    if (chave === 'questionario') {
+      router.push({ pathname: '/sinistro/[id]/questionario', params: { id: String(idSinistro) } });
+      return;
+    }
+
     mostrarAlerta(label, 'Esta funcionalidade ainda será implementada em uma próxima etapa.');
+  }
+
+  function transferirDados() {
+    router.push({ pathname: '/sinistro/[id]/transferencia', params: { id: String(idSinistro) } });
   }
 
   if (carregando) {
@@ -207,6 +221,13 @@ export default function SinistroScreen() {
           );
         })}
       </ScrollView>
+
+      <View style={[styles.rodape, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+        <Pressable style={styles.botaoTransferir} onPress={transferirDados}>
+          <Ionicons name="radio-outline" size={20} color="#fff" />
+          <Text style={styles.botaoTransferirTexto}>Transferir para o servidor</Text>
+        </Pressable>
+      </View>
     </View>
   );
 }
@@ -294,5 +315,25 @@ const styles = StyleSheet.create({
   },
   botaoTextoDesabilitado: {
     color: '#a8b2bb',
+  },
+  rodape: {
+    padding: 16,
+    backgroundColor: '#fff',
+    borderTopWidth: 1,
+    borderTopColor: '#eef2f5',
+  },
+  botaoTransferir: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#1c3d5a',
+    borderRadius: 10,
+    paddingVertical: 14,
+  },
+  botaoTransferirTexto: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 14,
   },
 });

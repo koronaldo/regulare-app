@@ -1,5 +1,5 @@
 import { notificarSinistrosNovos, registrarVerificacaoPeriodica } from './backgroundSync';
-import { prepararSenha, salvarCredenciais } from './credenciais';
+import { lerCredenciais, prepararSenha, salvarCredenciais } from './credenciais';
 import { importarDadosEstaticos, importarDadosLogin, precisaDadosEstaticos } from '../db/importLogin';
 import { inicializarBancoLocal } from '../db/schema';
 import { idsSinistrosLocais, listaSinistrosLocais } from '../db/sinistros';
@@ -28,6 +28,7 @@ export type LoginResult =
       nomregula: string;
       raw: unknown;
       banco: { tabelas: number; linhasTotal: number };
+      novosSinistros: number;
     }
   | { success: false; message: string };
 
@@ -52,15 +53,12 @@ async function sincronizarDadosEstaticosSeNecessario(): Promise<void> {
 }
 
 /**
- * Replica a autenticação do app legado (autentica_criptoX40.php):
- * senha com menos de 14 caracteres é tratada como texto puro e hasheada em
- * SHA256, enviada no formato bytea do PostgreSQL ("\x" + hex), que é como o
- * backend compara via `sha256(senha::bytea)::varchar`. lista_sini leva os
- * sinistros já salvos localmente (ver listaSinistrosLocais).
+ * Núcleo compartilhado entre o login digitado (`autenticarLegado`) e a sincronização manual com
+ * credencial já salva (`sincronizarComCredenciaisSalvas`): autentica no legado
+ * (autentica_criptoX40.php) e importa sinistros novos/atualizados. `senhaEnvio` já deve estar no
+ * formato que o backend espera (ver `prepararSenha`).
  */
-export async function autenticarLegado(usuario: string, senha: string): Promise<LoginResult> {
-  const senhaEnvio = await prepararSenha(senha);
-
+async function autenticarEImportar(usuario: string, senhaEnvio: string): Promise<LoginResult> {
   const body = new URLSearchParams({
     acao: 'LoginWeb',
     usuario,
@@ -110,9 +108,9 @@ export async function autenticarLegado(usuario: string, senha: string): Promise<
     await salvarCredenciais({ usuario, senhaEnvio });
     await registrarVerificacaoPeriodica();
 
-    const sinistrosResposta: Array<{ id_sinistro: number }> = Array.isArray(json.dados_sini) ? json.dados_sini : [];
+    const sinistrosResposta: { id_sinistro: number }[] = Array.isArray(json.dados_sini) ? json.dados_sini : [];
     const novos = sinistrosResposta.filter((s) => !idsAntes.has(Number(s.id_sinistro)));
-    console.log(`[auth] sinistros novos neste login: ${novos.length}`);
+    console.log(`[auth] sinistros novos: ${novos.length}`);
     if (novos.length > 0) {
       await notificarSinistrosNovos(novos.length);
     }
@@ -127,9 +125,35 @@ export async function autenticarLegado(usuario: string, senha: string): Promise<
       nomregula: json.dados?.nomregula ?? '',
       raw: json,
       banco: { tabelas, linhasTotal },
+      novosSinistros: novos.length,
     };
   }
 
   console.log('[auth] json.result não é true, json.msg =', json?.msg);
   return { success: false, message: 'Login ou senha inválidos.' };
+}
+
+/**
+ * Replica a autenticação do app legado (autentica_criptoX40.php):
+ * senha com menos de 14 caracteres é tratada como texto puro e hasheada em
+ * SHA256, enviada no formato bytea do PostgreSQL ("\x" + hex), que é como o
+ * backend compara via `sha256(senha::bytea)::varchar`. lista_sini leva os
+ * sinistros já salvos localmente (ver listaSinistrosLocais).
+ */
+export async function autenticarLegado(usuario: string, senha: string): Promise<LoginResult> {
+  const senhaEnvio = await prepararSenha(senha);
+  return autenticarEImportar(usuario, senhaEnvio);
+}
+
+/**
+ * Porta de "consultar novos sinistros" para a tela de lista: reautentica com a credencial já
+ * salva no aparelho (a mesma usada pela checagem periódica em segundo plano) e importa
+ * sinistros novos/atualizados — sem pedir usuário/senha de novo.
+ */
+export async function sincronizarComCredenciaisSalvas(): Promise<LoginResult> {
+  const credenciais = await lerCredenciais();
+  if (!credenciais) {
+    return { success: false, message: 'Nenhuma sessão salva. Faça login novamente.' };
+  }
+  return autenticarEImportar(credenciais.usuario, credenciais.senhaEnvio);
 }

@@ -1,5 +1,16 @@
-import { useCallback, useState } from 'react';
-import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useRef, useState, type RefObject } from 'react';
+import {
+  ActivityIndicator,
+  findNodeHandle,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  UIManager,
+  View,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
@@ -20,11 +31,14 @@ import {
 } from '../../../src/db/planilha';
 import { buscarSinistroPorId } from '../../../src/db/sinistros';
 import { mostrarAlerta } from '../../../src/utils/alerta';
+import { formatarMoedaDigitado } from '../../../src/utils/moeda';
+import { formatarDecimalDigitado } from '../../../src/utils/numero';
 
 function paraNumero(valor: string | number | null | undefined): number {
   if (typeof valor === 'number') return Number.isNaN(valor) ? 0 : valor;
-  // formato brasileiro: ponto separa milhar, vírgula separa decimal (ex.: "1.234,56")
-  const n = Number((valor || '0').replace(/\./g, '').replace(',', '.'));
+  // aceita "1.234,56" (formato salvo) e "R$ 1.234,56" (formato digitado com máscara na Quantidade/Valor Unitário)
+  const limpo = (valor ?? '').toString().replace(/[^\d,]/g, '').replace(',', '.');
+  const n = Number(limpo || '0');
   return Number.isNaN(n) ? 0 : n;
 }
 
@@ -65,6 +79,43 @@ export default function PlanilhaScreen() {
 
   const [form, setForm] = useState<FormSubItem | null>(null);
   const [salvando, setSalvando] = useState(false);
+  const [erroCampo, setErroCampo] = useState<{ campo: keyof FormSubItem; mensagem: string } | null>(null);
+
+  const scrollRef = useRef<ScrollView>(null);
+  const refNmPlanilhaItem = useRef<TextInput>(null);
+  const refNmPlanilha = useRef<TextInput>(null);
+  const refQtde = useRef<TextInput>(null);
+  const refVlrUniApr = useRef<TextInput>(null);
+
+  function erroDoCampo(campo: keyof FormSubItem): string | undefined {
+    return erroCampo?.campo === campo ? erroCampo.mensagem : undefined;
+  }
+
+  function focarCampoComErro(campo: keyof FormSubItem, mensagem: string) {
+    setErroCampo({ campo, mensagem });
+
+    const refsPorCampo: Partial<Record<keyof FormSubItem, RefObject<TextInput | null>>> = {
+      nm_planilha_item: refNmPlanilhaItem,
+      nm_planilha: refNmPlanilha,
+      qtde: refQtde,
+      vlr_uni_apr: refVlrUniApr,
+    };
+
+    const el = refsPorCampo[campo]?.current;
+    const elHandle = el ? findNodeHandle(el) : null;
+    const scrollHandle = scrollRef.current ? findNodeHandle(scrollRef.current) : null;
+    if (elHandle && scrollHandle) {
+      UIManager.measureLayout(
+        elHandle,
+        scrollHandle,
+        () => {},
+        (_x, y) => {
+          scrollRef.current?.scrollTo({ y: Math.max(y - 24, 0), animated: true });
+        },
+      );
+    }
+    if (el) setTimeout(() => el.focus(), 400);
+  }
 
   useFocusEffect(
     useCallback(() => {
@@ -80,6 +131,23 @@ export default function PlanilhaScreen() {
           setOpcoesTipoCobertura(tipos);
           setForm(null);
           setRenomeando(null);
+
+          // Só um tipo/cobertura disponível: não faz sentido pedir pra escolher, já carrega direto.
+          if (tipos.length === 1) {
+            const tipoUnico = String(tipos[0].valor);
+            setTipoCob(tipoUnico);
+            const coberturas = await listarCoberturasDoSinistroPorTipo(idSinistro, tipoUnico);
+            if (cancelado) return;
+            setOpcoesCobertura(coberturas);
+
+            if (coberturas.length === 1) {
+              const idCoberturaUnica = String(coberturas[0].valor);
+              setIdCobertura(idCoberturaUnica);
+              const lista = await listarItensPlanilha(idSinistro, Number(idCoberturaUnica));
+              if (cancelado) return;
+              setItens(lista);
+            }
+          }
         } finally {
           if (!cancelado) setCarregando(false);
         }
@@ -118,10 +186,12 @@ export default function PlanilhaScreen() {
       return;
     }
     const grupo = await proximoGrupo(idSinistro, Number(idCobertura));
+    setErroCampo(null);
     setForm({ modoNovoItem: true, id_planilha: null, grupoitem: grupo, nm_planilha_item: '', nm_planilha: '', qtde: '', vlr_uni_apr: '' });
   }
 
   function novoSubItem(item: ItemPlanilha) {
+    setErroCampo(null);
     setForm({
       modoNovoItem: false,
       id_planilha: null,
@@ -134,6 +204,7 @@ export default function PlanilhaScreen() {
   }
 
   function editarSubItem(item: ItemPlanilha, sub: ItemPlanilha['subitens'][number]) {
+    setErroCampo(null);
     setForm({
       modoNovoItem: false,
       id_planilha: sub.id_planilha,
@@ -141,21 +212,24 @@ export default function PlanilhaScreen() {
       nm_planilha_item: item.nm_planilha_item,
       nm_planilha: sub.nm_planilha,
       qtde: sub.qtde,
-      vlr_uni_apr: sub.vlr_uni_apr,
+      vlr_uni_apr: formatarMoeda(sub.vlr_uni_apr),
     });
   }
 
   function atualizarCampo<K extends keyof FormSubItem>(campo: K, valor: FormSubItem[K]) {
     setForm((atual) => (atual ? { ...atual, [campo]: valor } : atual));
+    setErroCampo((atual) => (atual?.campo === campo ? null : atual));
   }
 
   const totalForm = form ? paraNumero(form.qtde) * paraNumero(form.vlr_uni_apr) : 0;
 
-  function validar(f: FormSubItem): string | null {
-    if (f.modoNovoItem && !f.nm_planilha_item.trim()) return 'Informe o nome do item';
-    if (!f.nm_planilha.trim()) return 'Informe a descrição';
-    if (!f.vlr_uni_apr.trim()) return 'Informe o valor unitário';
-    if (!f.qtde.trim()) return 'Informe a quantidade';
+  function validar(f: FormSubItem): { campo: keyof FormSubItem; mensagem: string } | null {
+    if (f.modoNovoItem && !f.nm_planilha_item.trim()) {
+      return { campo: 'nm_planilha_item', mensagem: 'Informe o nome do item' };
+    }
+    if (!f.nm_planilha.trim()) return { campo: 'nm_planilha', mensagem: 'Informe a descrição' };
+    if (!f.vlr_uni_apr.trim()) return { campo: 'vlr_uni_apr', mensagem: 'Informe o valor unitário' };
+    if (!f.qtde.trim()) return { campo: 'qtde', mensagem: 'Informe a quantidade' };
     return null;
   }
 
@@ -163,9 +237,10 @@ export default function PlanilhaScreen() {
     if (!form || !idCobertura) return;
     const erro = validar(form);
     if (erro) {
-      mostrarAlerta('Campo obrigatório', erro);
+      focarCampoComErro(erro.campo, erro.mensagem);
       return;
     }
+    setErroCampo(null);
 
     setSalvando(true);
     try {
@@ -174,7 +249,7 @@ export default function PlanilhaScreen() {
         nm_planilha_item: form.modoNovoItem ? form.nm_planilha_item.trim() : form.nm_planilha_item,
         nm_planilha: form.nm_planilha.trim(),
         qtde: form.qtde,
-        vlr_uni_apr: form.vlr_uni_apr,
+        vlr_uni_apr: paraTextoValor(paraNumero(form.vlr_uni_apr)),
         vlr_tot_apr: paraTextoValor(totalForm),
       });
       await recarregarItens(Number(idCobertura));
@@ -261,9 +336,16 @@ export default function PlanilhaScreen() {
             {cabecalho.segurado} · Sinistro {cabecalho.sinistro}
           </Text>
         </View>
+        <Pressable
+          onPress={() => router.push({ pathname: '/sinistro/[id]', params: { id: String(idSinistro) } })}
+          hitSlop={10}
+          style={styles.botaoVoltar}
+        >
+          <Ionicons name="grid-outline" size={22} color="#fff" />
+        </Pressable>
       </View>
 
-      <ScrollView contentContainerStyle={styles.conteudo} keyboardShouldPersistTaps="handled">
+      <ScrollView ref={scrollRef} contentContainerStyle={styles.conteudo} keyboardShouldPersistTaps="handled">
         <Secao titulo="Cobertura">
           <Selecao label="Tipo" valor={tipoCob} opcoes={opcoesTipoCobertura} onChange={mudarTipo} obrigatorio />
           <Selecao
@@ -367,10 +449,18 @@ export default function PlanilhaScreen() {
 
         {form && (
           <Secao titulo={form.modoNovoItem ? 'Novo Item' : form.id_planilha ? 'Editar Subitem' : 'Novo Subitem'}>
+            {erroCampo && (
+              <View style={styles.bannerErro}>
+                <Ionicons name="alert-circle" size={20} color="#b3261e" />
+                <Text style={styles.bannerErroTexto}>{erroCampo.mensagem}</Text>
+              </View>
+            )}
             {form.modoNovoItem && (
               <Campo
+                ref={refNmPlanilhaItem}
                 label="Nome do item"
                 obrigatorio
+                erro={erroDoCampo('nm_planilha_item')}
                 value={form.nm_planilha_item}
                 onChangeText={(v) => atualizarCampo('nm_planilha_item', v)}
               />
@@ -378,23 +468,29 @@ export default function PlanilhaScreen() {
             {!form.modoNovoItem && <Text style={styles.itemPaiLabel}>Item: {form.nm_planilha_item}</Text>}
 
             <Campo
+              ref={refNmPlanilha}
               label="Descrição do subitem"
               obrigatorio
+              erro={erroDoCampo('nm_planilha')}
               value={form.nm_planilha}
               onChangeText={(v) => atualizarCampo('nm_planilha', v)}
             />
             <Campo
+              ref={refQtde}
               label="Quantidade"
               obrigatorio
+              erro={erroDoCampo('qtde')}
               value={form.qtde}
-              onChangeText={(v) => atualizarCampo('qtde', v)}
+              onChangeText={(v) => atualizarCampo('qtde', formatarDecimalDigitado(v))}
               keyboardType="numeric"
             />
             <Campo
+              ref={refVlrUniApr}
               label="Valor Unitário"
               obrigatorio
+              erro={erroDoCampo('vlr_uni_apr')}
               value={form.vlr_uni_apr}
-              onChangeText={(v) => atualizarCampo('vlr_uni_apr', v)}
+              onChangeText={(v) => atualizarCampo('vlr_uni_apr', formatarMoedaDigitado(v))}
               keyboardType="numeric"
             />
             <View style={styles.linhaTotalForm}>
@@ -445,6 +541,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#f4f6f8',
+  },
+  bannerErro: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: '#fdecea',
+    borderWidth: 1,
+    borderColor: '#f5c6c2',
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    marginBottom: 14,
+  },
+  bannerErroTexto: {
+    flex: 1,
+    color: '#8f2b23',
+    fontSize: 13,
   },
   header: {
     backgroundColor: '#1c3d5a',

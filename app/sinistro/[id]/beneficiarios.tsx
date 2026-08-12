@@ -1,5 +1,16 @@
-import { useCallback, useState } from 'react';
-import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useRef, useState, type RefObject } from 'react';
+import {
+  ActivityIndicator,
+  findNodeHandle,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  UIManager,
+  View,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
@@ -26,6 +37,7 @@ import {
 } from '../../../src/db/beneficiarios';
 import { buscarSinistroPorId } from '../../../src/db/sinistros';
 import { mostrarAlerta } from '../../../src/utils/alerta';
+import { cnpjValido, cpfValido, formatarCNPJ, formatarCPF } from '../../../src/utils/documentos';
 
 const OPCOES_QUEM: OpcaoSelecao[] = [
   { valor: 'Não Identificado', label: 'Não Identificado' },
@@ -115,6 +127,49 @@ export default function BeneficiariosScreen() {
   const [beneficiarios, setBeneficiarios] = useState<BeneficiarioResumo[]>([]);
   const [form, setForm] = useState<FormBeneficiario | null>(null);
   const [salvando, setSalvando] = useState(false);
+  const [erroCampo, setErroCampo] = useState<{ campo: keyof FormBeneficiario; mensagem: string } | null>(null);
+
+  const scrollRef = useRef<ScrollView>(null);
+  const refTipoCob = useRef<View>(null);
+  const refIdCobertura = useRef<View>(null);
+  const refNmBeneficiario = useRef<TextInput>(null);
+  const refCpfBeneficiario = useRef<TextInput>(null);
+  const refCodban = useRef<TextInput>(null);
+  const refNotaAva = useRef<View>(null);
+
+  function erroDoCampo(campo: keyof FormBeneficiario): string | undefined {
+    return erroCampo?.campo === campo ? erroCampo.mensagem : undefined;
+  }
+
+  function focarCampoComErro(campo: keyof FormBeneficiario, mensagem: string) {
+    setErroCampo({ campo, mensagem });
+
+    const refsPorCampo: Partial<Record<keyof FormBeneficiario, RefObject<TextInput | View | null>>> = {
+      tipo_cob: refTipoCob,
+      id_cobertura: refIdCobertura,
+      nm_beneficiario: refNmBeneficiario,
+      cpf_beneficiario: refCpfBeneficiario,
+      codban: refCodban,
+      nota_ava: refNotaAva,
+    };
+
+    const el = refsPorCampo[campo]?.current;
+    const elHandle = el ? findNodeHandle(el) : null;
+    const scrollHandle = scrollRef.current ? findNodeHandle(scrollRef.current) : null;
+    if (elHandle && scrollHandle) {
+      UIManager.measureLayout(
+        elHandle,
+        scrollHandle,
+        () => {},
+        (_x, y) => {
+          scrollRef.current?.scrollTo({ y: Math.max(y - 24, 0), animated: true });
+        },
+      );
+    }
+    if (el && 'focus' in el && typeof el.focus === 'function') {
+      setTimeout(() => el.focus(), 400);
+    }
+  }
 
   const [dadosSegurado, setDadosSegurado] = useState<DadosSegurado | null>(null);
   const [idSeguradora, setIdSeguradora] = useState<number | null>(null);
@@ -168,6 +223,7 @@ export default function BeneficiariosScreen() {
   function novoBeneficiario() {
     setOpcoesCobertura([]);
     setOpcoesTipoConta([]);
+    setErroCampo(null);
     mostrarAlerta('Sugestão', 'O segurado é o beneficiário?', [
       {
         text: 'Não',
@@ -194,11 +250,13 @@ export default function BeneficiariosScreen() {
     ]);
     setOpcoesCobertura(coberturas);
     setOpcoesTipoConta(tiposConta);
+    setErroCampo(null);
     setForm(formInicial(b));
   }
 
   async function mudarTipoCobertura(tipo: string) {
     setForm((atual) => (atual ? { ...atual, tipo_cob: tipo, id_cobertura: '' } : atual));
+    setErroCampo((atual) => (atual?.campo === 'tipo_cob' ? null : atual));
     const coberturas = await listarCoberturasDoSinistroPorTipo(idSinistro, tipo);
     setOpcoesCobertura(coberturas);
   }
@@ -233,14 +291,25 @@ export default function BeneficiariosScreen() {
 
   function atualizarCampo<K extends keyof FormBeneficiario>(campo: K, valor: FormBeneficiario[K]) {
     setForm((atual) => (atual ? { ...atual, [campo]: valor } : atual));
+    setErroCampo((atual) => (atual?.campo === campo ? null : atual));
   }
 
-  function validar(f: FormBeneficiario): string | null {
-    if (!f.tipo_cob) return 'Informe o tipo da cobertura';
-    if (!f.id_cobertura) return 'Informe a cobertura';
-    if (!f.nm_beneficiario.trim()) return 'Informe o nome';
-    if (!f.id_banco && !f.codban.trim()) return 'Se o banco não for informado, digite o código do banco';
-    if (dadosSegurado?.avaliaSegura && !f.nota_ava) return 'Informe a nota de recomendação';
+  function validar(f: FormBeneficiario): { campo: keyof FormBeneficiario; mensagem: string } | null {
+    if (!f.tipo_cob) return { campo: 'tipo_cob', mensagem: 'Informe o tipo da cobertura' };
+    if (!f.id_cobertura) return { campo: 'id_cobertura', mensagem: 'Informe a cobertura' };
+    if (!f.nm_beneficiario.trim()) return { campo: 'nm_beneficiario', mensagem: 'Informe o nome' };
+    if (f.cpf_beneficiario.trim()) {
+      const docInvalido = f.tipo_doc === 'J' ? !cnpjValido(f.cpf_beneficiario) : !cpfValido(f.cpf_beneficiario);
+      if (docInvalido) {
+        return { campo: 'cpf_beneficiario', mensagem: f.tipo_doc === 'J' ? 'CNPJ inválido' : 'CPF inválido' };
+      }
+    }
+    if (!f.id_banco && !f.codban.trim()) {
+      return { campo: 'codban', mensagem: 'Se o banco não for informado, digite o código do banco' };
+    }
+    if (dadosSegurado?.avaliaSegura && !f.nota_ava) {
+      return { campo: 'nota_ava', mensagem: 'Informe a nota de recomendação' };
+    }
     return null;
   }
 
@@ -248,9 +317,10 @@ export default function BeneficiariosScreen() {
     if (!form) return;
     const erro = validar(form);
     if (erro) {
-      mostrarAlerta('Campo obrigatório', erro);
+      focarCampoComErro(erro.campo, erro.mensagem);
       return;
     }
+    setErroCampo(null);
 
     const dados: DadosBeneficiario = {
       id_cobertura: Number(form.id_cobertura),
@@ -330,9 +400,16 @@ export default function BeneficiariosScreen() {
             {cabecalho.segurado} · Sinistro {cabecalho.sinistro}
           </Text>
         </View>
+        <Pressable
+          onPress={() => router.push({ pathname: '/sinistro/[id]', params: { id: String(idSinistro) } })}
+          hitSlop={10}
+          style={styles.botaoVoltar}
+        >
+          <Ionicons name="grid-outline" size={22} color="#fff" />
+        </Pressable>
       </View>
 
-      <ScrollView contentContainerStyle={styles.conteudo} keyboardShouldPersistTaps="handled">
+      <ScrollView ref={scrollRef} contentContainerStyle={styles.conteudo} keyboardShouldPersistTaps="handled">
         {!temCobertura && (
           <View style={styles.avisoCobertura}>
             <Ionicons name="alert-circle" size={20} color="#8f2b23" />
@@ -366,19 +443,29 @@ export default function BeneficiariosScreen() {
 
         {form && (
           <Secao titulo={form.id_beneficio ? 'Editar Beneficiário' : 'Novo Beneficiário'}>
+            {erroCampo && (
+              <View style={styles.bannerErro}>
+                <Ionicons name="alert-circle" size={20} color="#b3261e" />
+                <Text style={styles.bannerErroTexto}>{erroCampo.mensagem}</Text>
+              </View>
+            )}
             <Selecao
+              ref={refTipoCob}
               label="Tipo"
               valor={form.tipo_cob}
               opcoes={opcoesTipoCobertura}
               onChange={mudarTipoCobertura}
               obrigatorio
+              erro={erroDoCampo('tipo_cob')}
             />
             <Selecao
+              ref={refIdCobertura}
               label="Cobertura"
               valor={form.id_cobertura}
               opcoes={opcoesCobertura}
               onChange={(v) => atualizarCampo('id_cobertura', v)}
               obrigatorio
+              erro={erroDoCampo('id_cobertura')}
             />
             <Selecao
               label="Pagamento"
@@ -388,8 +475,10 @@ export default function BeneficiariosScreen() {
             />
             <Selecao label="Quem" valor={form.quem} opcoes={OPCOES_QUEM} onChange={mudarQuem} />
             <Campo
+              ref={refNmBeneficiario}
               label="Nome"
               obrigatorio
+              erro={erroDoCampo('nm_beneficiario')}
               value={form.nm_beneficiario}
               onChangeText={(v) => atualizarCampo('nm_beneficiario', v)}
             />
@@ -400,10 +489,16 @@ export default function BeneficiariosScreen() {
               onChange={(v) => atualizarCampo('tipo_doc', v)}
             />
             <Campo
+              ref={refCpfBeneficiario}
               label={form.tipo_doc === 'J' ? 'CNPJ' : 'CPF'}
+              erro={erroDoCampo('cpf_beneficiario')}
               value={form.cpf_beneficiario}
-              onChangeText={(v) => atualizarCampo('cpf_beneficiario', v)}
-              keyboardType="numeric"
+              onChangeText={(v) =>
+                atualizarCampo('cpf_beneficiario', form.tipo_doc === 'J' ? formatarCNPJ(v) : formatarCPF(v))
+              }
+              keyboardType={form.tipo_doc === 'J' ? 'default' : 'number-pad'}
+              autoCapitalize={form.tipo_doc === 'J' ? 'characters' : 'none'}
+              maxLength={form.tipo_doc === 'J' ? 18 : 14}
             />
             <Selecao
               label="Banco"
@@ -412,7 +507,9 @@ export default function BeneficiariosScreen() {
               onChange={(v) => atualizarCampo('id_banco', v)}
             />
             <Campo
+              ref={refCodban}
               label="Código do banco (se não estiver na lista)"
+              erro={erroDoCampo('codban')}
               value={form.codban}
               onChangeText={(v) => atualizarCampo('codban', v)}
               keyboardType="numeric"
@@ -428,11 +525,13 @@ export default function BeneficiariosScreen() {
               onChange={(v) => atualizarCampo('id_tipoconta', v)}
             />
             <Selecao
+              ref={refNotaAva}
               label="Nota de Recomendação"
               valor={form.nota_ava}
               opcoes={OPCOES_NOTA_AVA}
               onChange={(v) => atualizarCampo('nota_ava', v)}
               obrigatorio={!!dadosSegurado?.avaliaSegura}
+              erro={erroDoCampo('nota_ava')}
             />
 
             <View style={styles.linhaBotoesForm}>
@@ -478,6 +577,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#f4f6f8',
+  },
+  bannerErro: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: '#fdecea',
+    borderWidth: 1,
+    borderColor: '#f5c6c2',
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    marginBottom: 14,
+  },
+  bannerErroTexto: {
+    flex: 1,
+    color: '#8f2b23',
+    fontSize: 13,
   },
   header: {
     backgroundColor: '#1c3d5a',

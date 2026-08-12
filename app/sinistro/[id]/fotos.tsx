@@ -336,6 +336,10 @@ export default function FotosScreen() {
     router.back();
   }
 
+  function irParaControle() {
+    router.push({ pathname: '/sinistro/[id]', params: { id: String(idSinistro) } });
+  }
+
   const opcoesLegenda = legendas.map((l) => ({
     valor: String(l.id_legendaf),
     label: l.nm_legendaf,
@@ -356,7 +360,7 @@ export default function FotosScreen() {
       <DraxProvider>
         <StatusBar style="light" />
 
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingTop: Math.max(insets.top, 24) + 8 }]}>
           <Pressable onPress={voltar} hitSlop={10} style={styles.botaoVoltar}>
             <Ionicons name="arrow-back" size={22} color="#fff" />
           </Pressable>
@@ -366,6 +370,9 @@ export default function FotosScreen() {
               {cabecalho.segurado} · Sinistro {cabecalho.sinistro}
             </Text>
           </View>
+          <Pressable onPress={irParaControle} hitSlop={10} style={styles.botaoControle}>
+            <Ionicons name="grid-outline" size={22} color="#fff" />
+          </Pressable>
         </View>
 
         <View style={styles.segmentado}>
@@ -817,5 +824,8 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '700',
     fontSize: 15,
+  },
+  botaoControle: {
+    marginTop: 2,
   },
 });

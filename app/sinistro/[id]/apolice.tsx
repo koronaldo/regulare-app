@@ -177,6 +177,13 @@ export default function ApoliceScreen() {
             {cabecalho.segurado} · Sinistro {cabecalho.sinistro}
           </Text>
         </View>
+        <Pressable
+          onPress={() => router.push({ pathname: '/sinistro/[id]', params: { id: String(idSinistro) } })}
+          hitSlop={10}
+          style={styles.botaoVoltar}
+        >
+          <Ionicons name="grid-outline" size={22} color="#fff" />
+        </Pressable>
       </View>
 
       <ScrollView contentContainerStyle={styles.conteudo}>

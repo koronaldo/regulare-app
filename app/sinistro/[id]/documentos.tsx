@@ -7,6 +7,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Sharing from 'expo-sharing';
 import { Directory, File, Paths } from 'expo-file-system';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Campo } from '../../../src/components/form/Campo';
 import { Selecao, type OpcaoSelecao } from '../../../src/components/form/Selecao';
@@ -63,6 +64,7 @@ function diretorioArquivos(idSinistro: number): Directory {
 export default function DocumentosScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const idSinistro = Number(id);
+  const insets = useSafeAreaInsets();
 
   const [carregando, setCarregando] = useState(true);
   const [cabecalho, setCabecalho] = useState({ segurado: '', sinistro: '' });
@@ -116,11 +118,18 @@ export default function DocumentosScreen() {
     carregar(filtro, valor);
   }
 
-  async function alternarSolicitado(idDocumento: number, valor: boolean) {
+  async function alternarSolicitado(doc: DocumentoResumo, valor: boolean) {
+    if (!valor && (doc.instancias.length > 0 || doc.arquivos.length > 0)) {
+      mostrarAlerta(
+        'Não é possível desmarcar',
+        'Este documento já tem arquivos anexados. Remova-os antes de desmarcar como solicitado.',
+      );
+      return;
+    }
     if (valor) {
-      await marcarSolicitado(idSinistro, idDocumento);
+      await marcarSolicitado(idSinistro, doc.id_documento);
     } else {
-      await removerSolicitacao(idSinistro, idDocumento);
+      await removerSolicitacao(idSinistro, doc.id_documento);
     }
     await carregar(filtro, pesquisa);
   }
@@ -244,6 +253,10 @@ export default function DocumentosScreen() {
     router.back();
   }
 
+  function irParaControle() {
+    router.push({ pathname: '/sinistro/[id]', params: { id: String(idSinistro) } });
+  }
+
   if (carregando) {
     return (
       <View style={styles.centro}>
@@ -257,7 +270,7 @@ export default function DocumentosScreen() {
     <View style={styles.container}>
       <StatusBar style="light" />
 
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: Math.max(insets.top, 24) + 8 }]}>
         <Pressable onPress={voltar} hitSlop={10} style={styles.botaoVoltar}>
           <Ionicons name="arrow-back" size={22} color="#fff" />
         </Pressable>
@@ -267,6 +280,9 @@ export default function DocumentosScreen() {
             {cabecalho.segurado} · Sinistro {cabecalho.sinistro}
           </Text>
         </View>
+        <Pressable onPress={irParaControle} hitSlop={10} style={styles.botaoControle}>
+          <Ionicons name="grid-outline" size={22} color="#fff" />
+        </Pressable>
       </View>
 
       <View style={styles.barraFiltro}>
@@ -295,7 +311,7 @@ export default function DocumentosScreen() {
                   </Text>
                   <Switch
                     value={doc.solicitado}
-                    onValueChange={(v) => alternarSolicitado(doc.id_documento, v)}
+                    onValueChange={(v) => alternarSolicitado(doc, v)}
                     trackColor={{ true: '#1c3d5a' }}
                   />
                 </View>
@@ -427,7 +443,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   grupoCabecalho: {
-    backgroundColor: '#2a88ad',
+    backgroundColor: '#1c3d5a',
     borderRadius: 10,
     paddingVertical: 10,
     paddingHorizontal: 14,
@@ -521,5 +537,8 @@ const styles = StyleSheet.create({
     color: '#1c3d5a',
     fontWeight: '600',
     fontSize: 12,
+  },
+  botaoControle: {
+    marginTop: 2,
   },
 });

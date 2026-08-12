@@ -12,27 +12,11 @@ import { Secao } from '../../../src/components/form/Secao';
 import { inserirFoto } from '../../../src/db/fotos';
 import { buscarSinistroPorId, type SinistroDetalhe } from '../../../src/db/sinistros';
 import { mostrarAlerta } from '../../../src/utils/alerta';
+import { paraCoordenadasGrau } from '../../../src/utils/coordenadas';
 import { reduzImagem } from '../../../src/utils/imagem';
 
 function diretorioFotos(idSinistro: number): Directory {
   return new Directory(Paths.document, 'RegulareFiles', String(idSinistro), 'Fotos');
-}
-
-/** Porta de getDms (definicoes.js). */
-function paraGrauMinutoSegundo(valor: number): string {
-  const val = Math.abs(valor);
-  const grau = Math.floor(val);
-  const minuto = Math.floor((val - grau) * 60);
-  const segundo = Math.round((val - grau - minuto / 60) * 3600 * 1000) / 1000;
-  return `${grau}° ${minuto}' ${segundo}" `;
-}
-
-/** Porta de ddToDms (definicoes.js). */
-function paraCoordenadasGrau(lat: number, lng: number): { latitude: string; longitude: string } {
-  return {
-    latitude: (lat >= 0 ? 'N => ' : 'S => ') + paraGrauMinutoSegundo(lat),
-    longitude: (lng >= 0 ? 'L => ' : 'O => ') + paraGrauMinutoSegundo(lng),
-  };
 }
 
 export default function CoordenadasScreen() {

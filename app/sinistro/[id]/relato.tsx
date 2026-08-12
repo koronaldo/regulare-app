@@ -147,6 +147,13 @@ export default function RelatoScreen() {
             {cabecalho.segurado} · Sinistro {cabecalho.sinistro}
           </Text>
         </View>
+        <Pressable
+          onPress={() => router.push({ pathname: '/sinistro/[id]', params: { id: String(idSinistro) } })}
+          hitSlop={10}
+          style={styles.botaoVoltar}
+        >
+          <Ionicons name="grid-outline" size={22} color="#fff" />
+        </Pressable>
       </View>
 
       <ScrollView contentContainerStyle={styles.conteudo} keyboardShouldPersistTaps="handled">
@@ -157,7 +164,7 @@ export default function RelatoScreen() {
             <TextInput
               style={styles.textarea}
               multiline
-              numberOfLines={6}
+              numberOfLines={10}
               textAlignVertical="top"
               value={respostas[s.id_mobile] ?? ''}
               onChangeText={(v) => atualizarResposta(s.id_mobile, v)}
@@ -244,7 +251,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     fontSize: 14,
     backgroundColor: '#fff',
-    minHeight: 120,
+    minHeight: 200,
   },
   rodape: {
     flexDirection: 'row',

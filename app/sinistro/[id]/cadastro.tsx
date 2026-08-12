@@ -1,5 +1,16 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
-import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  ActivityIndicator,
+  findNodeHandle,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  UIManager,
+  View,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -21,6 +32,8 @@ import {
   type CorretoraInfo,
 } from '../../../src/db/sinistros';
 import { mostrarAlerta } from '../../../src/utils/alerta';
+import { cnpjValido, cpfValido, formatarCNPJ, formatarCPF } from '../../../src/utils/documentos';
+import { formatarTelefone } from '../../../src/utils/telefone';
 
 const OPCOES_TIPO_DOC: OpcaoSelecao[] = [
   { valor: 'F', label: 'Física' },
@@ -148,6 +161,7 @@ export default function CadastroSinistroScreen() {
   const scrollRef = useRef<ScrollView>(null);
 
   const refNmSegurado = useRef<TextInput>(null);
+  const refNroDocto = useRef<TextInput>(null);
   const refEndereco = useRef<TextInput>(null);
   const refIdEstado = useRef<View>(null);
   const refIdCidade = useRef<View>(null);
@@ -308,6 +322,15 @@ export default function CadastroSinistroScreen() {
   /** Porta de GravarDados (cadprocesso_def_screen.js): mesma ordem e mensagens do sistema legado. */
   function validar(): { campo: keyof FormState; mensagem: string } | null {
     if (!form.nm_segurado.trim()) return { campo: 'nm_segurado', mensagem: 'Informe o nome do segurado' };
+    if (form.nro_docto.trim()) {
+      const docInvalido = form.tipo_doc === 'J' ? !cnpjValido(form.nro_docto) : !cpfValido(form.nro_docto);
+      if (docInvalido) {
+        return {
+          campo: 'nro_docto',
+          mensagem: form.tipo_doc === 'J' ? 'CNPJ inválido' : 'CPF inválido',
+        };
+      }
+    }
     if (!form.endereco.trim()) return { campo: 'endereco', mensagem: 'Informe a endereço' };
     if (!form.id_estado) return { campo: 'id_estado', mensagem: 'Informe a UF' };
     if (!form.id_cidade) return { campo: 'id_cidade', mensagem: 'Informe a cidade' };
@@ -322,6 +345,7 @@ export default function CadastroSinistroScreen() {
     if (!form.id_relacaoseg)
       return { campo: 'id_relacaoseg', mensagem: 'Informe a relação do atendente com o segurado' };
     if (!form.rg_atendente.trim()) return { campo: 'rg_atendente', mensagem: 'Informe o CPF do atendente' };
+    if (!cpfValido(form.rg_atendente)) return { campo: 'rg_atendente', mensagem: 'CPF do atendente inválido' };
     if (!form.mesma_pessoa)
       return { campo: 'mesma_pessoa', mensagem: 'Informe se quem atendeu é mesma pessoa que assinou' };
     if (!form.tratar_ass) return { campo: 'tratar_ass', mensagem: 'Informe a tratativa do assinante' };
@@ -329,6 +353,7 @@ export default function CadastroSinistroScreen() {
     if (!form.id_relacaoass)
       return { campo: 'id_relacaoass', mensagem: 'Informe a relação do assinante com o segurado' };
     if (!form.rg_assina.trim()) return { campo: 'rg_assina', mensagem: 'Informe o CPF do assinante' };
+    if (!cpfValido(form.rg_assina)) return { campo: 'rg_assina', mensagem: 'CPF do assinante inválido' };
     if (!form.id_preserva) return { campo: 'id_preserva', mensagem: 'Informe se os bens estão preservados' };
     return null;
   }
@@ -338,6 +363,7 @@ export default function CadastroSinistroScreen() {
 
     const refsPorCampo: Partial<Record<keyof FormState, RefObject<TextInput | View | null>>> = {
       nm_segurado: refNmSegurado,
+      nro_docto: refNroDocto,
       endereco: refEndereco,
       id_estado: refIdEstado,
       id_cidade: refIdCidade,
@@ -360,17 +386,21 @@ export default function CadastroSinistroScreen() {
     };
 
     const el = refsPorCampo[campo]?.current;
-    if (el && scrollRef.current) {
-      el.measureLayout(
-        scrollRef.current.getInnerViewNode(),
-        (_x: number, y: number) => {
+    const elHandle = el ? findNodeHandle(el) : null;
+    const scrollHandle = scrollRef.current ? findNodeHandle(scrollRef.current) : null;
+
+    if (elHandle && scrollHandle) {
+      UIManager.measureLayout(
+        elHandle,
+        scrollHandle,
+        () => {},
+        (_x, y) => {
           scrollRef.current?.scrollTo({ y: Math.max(y - 24, 0), animated: true });
         },
-        () => {},
       );
     }
     if (el && 'focus' in el && typeof el.focus === 'function') {
-      setTimeout(() => el.focus(), 300);
+      setTimeout(() => el.focus(), 400);
     }
   }
 
@@ -469,6 +499,13 @@ export default function CadastroSinistroScreen() {
         >
           <Ionicons name="location-outline" size={22} color="#fff" />
         </Pressable>
+        <Pressable
+          onPress={() => router.push({ pathname: '/sinistro/[id]', params: { id: String(idSinistro) } })}
+          hitSlop={10}
+          style={styles.botaoCoordenadas}
+        >
+          <Ionicons name="grid-outline" size={22} color="#fff" />
+        </Pressable>
       </View>
 
       <ScrollView ref={scrollRef} contentContainerStyle={styles.conteudo} keyboardShouldPersistTaps="handled">
@@ -489,7 +526,18 @@ export default function CadastroSinistroScreen() {
             onChangeText={(v) => atualizar('nm_segurado', v)}
           />
           <Selecao label="Tipo Doc." valor={form.tipo_doc} opcoes={OPCOES_TIPO_DOC} onChange={(v) => atualizar('tipo_doc', v)} />
-          <Campo label="Nro. Docto." value={form.nro_docto} onChangeText={(v) => atualizar('nro_docto', v)} />
+          <Campo
+            ref={refNroDocto}
+            label={form.tipo_doc === 'J' ? 'CNPJ' : 'CPF'}
+            erro={erroDoCampo('nro_docto')}
+            value={form.nro_docto}
+            onChangeText={(v) =>
+              atualizar('nro_docto', form.tipo_doc === 'J' ? formatarCNPJ(v) : formatarCPF(v))
+            }
+            keyboardType={form.tipo_doc === 'J' ? 'default' : 'number-pad'}
+            autoCapitalize={form.tipo_doc === 'J' ? 'characters' : 'none'}
+            maxLength={form.tipo_doc === 'J' ? 18 : 14}
+          />
           <Campo
             ref={refEndereco}
             label="Endereço"
@@ -526,10 +574,17 @@ export default function CadastroSinistroScreen() {
             obrigatorio
             erro={erroDoCampo('telefone')}
             value={form.telefone}
-            onChangeText={(v) => atualizar('telefone', v)}
+            onChangeText={(v) => atualizar('telefone', formatarTelefone(v))}
             keyboardType="phone-pad"
+            maxLength={15}
           />
-          <Campo label="Celular" value={form.celular} onChangeText={(v) => atualizar('celular', v)} keyboardType="phone-pad" />
+          <Campo
+            label="Celular"
+            value={form.celular}
+            onChangeText={(v) => atualizar('celular', formatarTelefone(v))}
+            keyboardType="phone-pad"
+            maxLength={15}
+          />
           <Campo label="Email" value={form.email} onChangeText={(v) => atualizar('email', v)} keyboardType="email-address" autoCapitalize="none" />
           <Campo
             label="Representante contato com o Segurado"
@@ -576,7 +631,9 @@ export default function CadastroSinistroScreen() {
             obrigatorio
             erro={erroDoCampo('rg_atendente')}
             value={form.rg_atendente}
-            onChangeText={(v) => atualizar('rg_atendente', v)}
+            onChangeText={(v) => atualizar('rg_atendente', formatarCPF(v))}
+            keyboardType="number-pad"
+            maxLength={14}
           />
           <Selecao
             ref={refIdRelacaoseg}
@@ -622,7 +679,9 @@ export default function CadastroSinistroScreen() {
             obrigatorio
             erro={erroDoCampo('rg_assina')}
             value={form.rg_assina}
-            onChangeText={(v) => atualizar('rg_assina', v)}
+            onChangeText={(v) => atualizar('rg_assina', formatarCPF(v))}
+            keyboardType="number-pad"
+            maxLength={14}
           />
           <Selecao
             ref={refIdRelacaoass}

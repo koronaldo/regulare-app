@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -19,6 +19,7 @@ import ReanimatedSwipeable from 'react-native-gesture-handler/ReanimatedSwipeabl
 
 import { cancelarVerificacaoPeriodica } from '../src/services/backgroundSync';
 import { limparCredenciais } from '../src/services/credenciais';
+import { sincronizarComCredenciaisSalvas } from '../src/services/auth';
 import { contarSinistros, listarSinistros, type SinistroResumo, type SituacaoSinistro } from '../src/db/sinistros';
 import { excluirSinistroCompleto } from '../src/db/excluirSinistro';
 
@@ -41,9 +42,20 @@ export default function DashboardScreen() {
   const [sinistros, setSinistros] = useState<SinistroResumo[]>([]);
   const [total, setTotal] = useState(0);
   const [carregando, setCarregando] = useState(false);
+  const [sincronizando, setSincronizando] = useState(false);
   const [expandido, setExpandido] = useState<number | null>(null);
 
   const codregNum = Number(codreg);
+
+  const recarregarLista = useCallback(async () => {
+    if (!codregNum) return;
+    const [lista, totalCount] = await Promise.all([
+      listarSinistros(codregNum, situacao, busca),
+      contarSinistros(codregNum, situacao),
+    ]);
+    setSinistros(lista);
+    setTotal(totalCount);
+  }, [codregNum, situacao, busca]);
 
   useEffect(() => {
     if (!codregNum) return;
@@ -72,6 +84,26 @@ export default function DashboardScreen() {
       cancelado = true;
     };
   }, [codregNum, situacao, busca]);
+
+  async function sincronizarAgora() {
+    setSincronizando(true);
+    try {
+      const resultado = await sincronizarComCredenciaisSalvas();
+      if (!resultado.success) {
+        Alert.alert('Erro ao consultar', resultado.message);
+        return;
+      }
+      await recarregarLista();
+      Alert.alert(
+        'Consulta concluída',
+        resultado.novosSinistros > 0
+          ? `${resultado.novosSinistros} sinistro(s) novo(s) encontrado(s).`
+          : 'Nenhum sinistro novo no servidor.',
+      );
+    } finally {
+      setSincronizando(false);
+    }
+  }
 
   function ligar(numero: string | null) {
     if (!numero) return;
@@ -120,9 +152,18 @@ export default function DashboardScreen() {
             {nomusu || '-'}
           </Text>
         </View>
-        <Pressable onPress={sair} style={styles.botaoSair} hitSlop={10}>
-          <Ionicons name="log-out-outline" size={22} color="#fff" />
-        </Pressable>
+        <View style={styles.headerAcoes}>
+          <Pressable onPress={sincronizarAgora} style={styles.botaoSair} hitSlop={10} disabled={sincronizando}>
+            {sincronizando ? (
+              <ActivityIndicator color="#fff" size="small" />
+            ) : (
+              <Ionicons name="cloud-download-outline" size={22} color="#fff" />
+            )}
+          </Pressable>
+          <Pressable onPress={sair} style={styles.botaoSair} hitSlop={10}>
+            <Ionicons name="log-out-outline" size={22} color="#fff" />
+          </Pressable>
+        </View>
       </View>
 
       <View style={styles.abas}>
@@ -229,7 +270,12 @@ export default function DashboardScreen() {
                     {item.nm_cidade ? `  ·  ${item.nm_cidade}/${item.id_estado}` : ''}
                   </Text>
                   {item.nm_causa && <Text style={styles.cardLinha}>Causa: {item.nm_causa}</Text>}
-                  {item.nm_produto && <Text style={styles.cardLinha}>Produto: {item.nm_produto}</Text>}
+                  {item.nm_produto && (
+                    <Text style={styles.cardLinha}>
+                      Produto: {item.nm_produto}
+                      {item.apelido ? `  ·  ${item.apelido}` : ''}
+                    </Text>
+                  )}
                 </Pressable>
 
                 <Pressable
@@ -315,6 +361,11 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 15,
     fontWeight: '600',
+  },
+  headerAcoes: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
   },
   botaoSair: {
     padding: 4,
