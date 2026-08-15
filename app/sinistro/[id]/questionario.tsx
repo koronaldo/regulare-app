@@ -1,5 +1,14 @@
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
@@ -211,8 +220,16 @@ export default function QuestionarioScreen() {
         >
           <Ionicons name="grid-outline" size={22} color="#fff" />
         </Pressable>
+        <Pressable
+          onPress={() => router.push({ pathname: '/sinistro/[id]/transferencia', params: { id: String(idSinistro) } })}
+          hitSlop={10}
+          style={styles.botaoVoltar}
+        >
+          <Ionicons name="cloud-upload-outline" size={22} color="#fff" />
+        </Pressable>
       </View>
 
+      <KeyboardAvoidingView style={styles.flex1} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <ScrollView contentContainerStyle={styles.conteudo}>
         {questionarios.length === 0 && <Text style={styles.vazioTexto}>Nenhum questionário disponível.</Text>}
 
@@ -291,6 +308,7 @@ export default function QuestionarioScreen() {
           </View>
         ))}
       </ScrollView>
+      </KeyboardAvoidingView>
     </View>
   );
 }
@@ -299,6 +317,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f4f6f8',
+  },
+  flex1: {
+    flex: 1,
   },
   centro: {
     flex: 1,

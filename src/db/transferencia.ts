@@ -11,6 +11,50 @@ export interface ItemTransferencia {
 /** id_tipotrans de "Informações Gerais" no legado: exige que todos os itens da apólice estejam conferidos antes de liberar a transferência. */
 const ID_TIPOTRANS_INFORMACOES = 4;
 
+/** id_tipotrans de "Dados cadastrais" no legado (ação DadosSinistro em sicroniza_sinistro_new.php). */
+const ID_TIPOTRANS_CADASTRO = 1;
+
+/** id_tipotrans de "Relato Segurado" e "Constatações Regulador" no legado — cada um mapeia pra um id_texto (sinitexto/sinitextomob). */
+const ID_TIPOTRANS_RELATO = 2;
+const ID_TIPOTRANS_CONSTATACOES = 3;
+const ID_TEXTO_POR_TIPOTRANS: Record<number, number> = {
+  [ID_TIPOTRANS_RELATO]: 4,
+  [ID_TIPOTRANS_CONSTATACOES]: 5,
+};
+
+/** id_tipotrans de "Benfeitorias-Máquinas" no legado (ação DadosBenfeitoria em sicroniza_sinistro_new.php). */
+const ID_TIPOTRANS_BENFEITORIAS = 13;
+
+/** id_tipotrans de "Questionários" no legado (ação DadosQuestionario em sicroniza_sinistro_new.php). */
+const ID_TIPOTRANS_QUESTIONARIO = 14;
+
+/** id_tipotrans de "Coberturas" no legado (ação DadosCobertura em sicroniza_sinistro_new.php). */
+const ID_TIPOTRANS_COBERTURAS = 5;
+
+/** id_tipotrans de "Beneficiários" no legado (ação DadosBeneficiario em sicroniza_sinistro_new.php). */
+const ID_TIPOTRANS_BENEFICIARIOS = 6;
+
+/** id_tipotrans de "Planilha apuração" no legado (ação DadosPlanilha em sicroniza_sinistro_new.php). */
+const ID_TIPOTRANS_PLANILHA = 7;
+
+/** id_tipotrans de "Outros Seguros" no legado (ação DadosOutroSeg em sicroniza_sinistro_new.php). */
+const ID_TIPOTRANS_OUTROSEG = 8;
+
+/** id_tipotrans de "Album de fotografia" no legado (ação FotosSinistro em sicroniza_sinistro_new.php). */
+const ID_TIPOTRANS_FOTOS = 9;
+
+/** id_tipotrans de "Documentos digitalizados" no legado (transfere_pdf-2.0.php / transfere_recibo_pdf-2.0.php). */
+const ID_TIPOTRANS_DOCUMENTOS = 10;
+
+/** id_tipotrans de "Atas e termos" no legado (ConferindoAtasTermos/uploadFileATA) — separado de Documentos. */
+const ID_TIPOTRANS_ATAS = 11;
+
+/** id_tipotrans de "Vídeos & Áudios" no legado (ConferindoVideos/uploadFileVideos). */
+const ID_TIPOTRANS_VIDEOS = 12;
+
+/** id_tipotrans de "Comprovantes e Recibos" no legado (ConferindoRecibosDigitalizados/uploadRecibosPDF). */
+const ID_TIPOTRANS_RECIBOS = 15;
+
 /**
  * Porta de SituacaoInformacoes (transfere_sinistro_def_screen.js): compara quantos itens da
  * apólice existem contra quantos já foram conferidos neste sinistro (sinistro_apolice).
@@ -64,4 +108,40 @@ export async function listarStatusTransferencia(idSinistro: number): Promise<Ite
   );
 }
 
-export { ID_TIPOTRANS_INFORMACOES };
+/**
+ * Grava o resultado de uma transferência (sucesso ou erro) no mesmo padrão do legado:
+ * status_trans 'S'/'E' + data/hora do envio.
+ */
+export async function atualizarStatusTransferencia(
+  idSinistro: number,
+  idTipotrans: number,
+  status: 'S' | 'E',
+): Promise<void> {
+  const db = await getDb();
+  const agora = new Date();
+  const data = agora.toISOString().slice(0, 10);
+  const hora = agora.toTimeString().slice(0, 8);
+  await db.runAsync(
+    'update sini_trans set status_trans = ?, data_trans = ?, hora_trans = ? where id_sinistro = ? and id_tipotrans = ?',
+    [status, data, hora, idSinistro, idTipotrans],
+  );
+}
+
+export {
+  ID_TIPOTRANS_INFORMACOES,
+  ID_TIPOTRANS_CADASTRO,
+  ID_TIPOTRANS_RELATO,
+  ID_TIPOTRANS_CONSTATACOES,
+  ID_TEXTO_POR_TIPOTRANS,
+  ID_TIPOTRANS_BENFEITORIAS,
+  ID_TIPOTRANS_QUESTIONARIO,
+  ID_TIPOTRANS_COBERTURAS,
+  ID_TIPOTRANS_BENEFICIARIOS,
+  ID_TIPOTRANS_PLANILHA,
+  ID_TIPOTRANS_OUTROSEG,
+  ID_TIPOTRANS_FOTOS,
+  ID_TIPOTRANS_DOCUMENTOS,
+  ID_TIPOTRANS_ATAS,
+  ID_TIPOTRANS_VIDEOS,
+  ID_TIPOTRANS_RECIBOS,
+};

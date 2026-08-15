@@ -1,4 +1,5 @@
 import { getDb } from './client';
+import { registrarLog } from './logs';
 import type { OpcaoLista } from './sinistros';
 
 const BOTOES_LIBERADOS = ['outro', 'fotos', 'docs', 'despesas', 'videos', 'preliminar', 'apolice', 'questionario'];
@@ -163,6 +164,30 @@ export async function salvarOutroSeguro(idSinistro: number, idOutro: number | nu
   });
 
   await liberarBotoes(idSinistro);
+  await registrarLog(idSinistro, idOutro ? 'Outro Seguro alterado' : 'Outro Seguro inserido');
+}
+
+export interface OutroSeguroTransferencia {
+  id_cobertura: number;
+  id_outweb: number | null;
+  id_seguradora: number;
+  data_ini_vig: string | null;
+  data_fim_vig: string | null;
+  apolice: string | null;
+  vlr_lmi: string | number | null;
+  vlr_franquia: string | number | null;
+  perc_franquia: string | number | null;
+}
+
+/** Porta de ConferindoOutrosSeguros/CarregaDadosOutrosSeguros (transfere_sinistro_def_screen.js). */
+export async function listarOutrosSegurosParaTransferencia(idSinistro: number): Promise<OutroSeguroTransferencia[]> {
+  const db = await getDb();
+  return db.getAllAsync<OutroSeguroTransferencia>(
+    `select id_cobertura, id_outweb, id_seguradora, data_ini_vig, data_fim_vig, apolice,
+       vlr_lmi, vlr_franquia, perc_franquia
+     from sinimobcob_outro where id_sinistro = ?`,
+    [idSinistro],
+  );
 }
 
 /** Porta de RemovendoRegistro (cadoutroseg_def.js). */

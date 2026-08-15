@@ -1,4 +1,5 @@
 import { getDb } from './client';
+import { registrarLog } from './logs';
 import type { OpcaoLista } from './sinistros';
 
 export interface ConfiguracaoDespesa {
@@ -191,6 +192,8 @@ export async function salvarDespesa(idSinistro: number, idSinidesp: number | nul
       idSinistro,
     ]);
   });
+
+  await registrarLog(idSinistro, idSinidesp ? 'Despesa alterada' : 'Despesa inserida');
 }
 
 /** Porta de RemovendoRegistro (caddespesa_def_screen.js). */
@@ -219,6 +222,48 @@ export async function excluirRecibo(idSinistro: number, idSinidesp: number): Pro
     'update sinidesp_iti set nome_recibo = null, recibo_pdf = null where id_sinistro = ? and id_sinidesp = ?',
     [idSinistro, idSinidesp],
   );
+}
+
+export interface ReciboParaTransferencia {
+  id_sinidesp: number;
+  nome_recibo: string;
+  nm_despesa: string;
+  comple: string;
+}
+
+/**
+ * Comprovantes fotografados (sinidesp_iti.nome_recibo) ainda não confirmados no servidor.
+ * id_despeweb não tem nenhum uso local hoje além deste — reaproveitado como flag de "já enviado"
+ * (0/null = pendente), igual ao "chave_rec" que o legado devolvia e gravava de volta. O nome
+ * "real"/legível do arquivo (com numeração de anexo etc.) é montado no servidor, não aqui — só
+ * manda nm_despesa e complemento.
+ */
+export async function listarRecibosParaTransferencia(idSinistro: number): Promise<ReciboParaTransferencia[]> {
+  const db = await getDb();
+  const linhas = await db.getAllAsync<{
+    id_sinidesp: number;
+    nome_recibo: string | null;
+    nm_despesa: string;
+    comple: string | null;
+  }>(
+    `select sd.id_sinidesp, sd.nome_recibo, de.nm_despesa, sd.comple
+     from sinidesp_iti sd
+     inner join despesa de on de.id_despesa = sd.id_despesa
+     where sd.id_sinistro = ? and sd.nome_recibo is not null and sd.nome_recibo <> ''
+       and (sd.id_despeweb is null or sd.id_despeweb = 0)`,
+    [idSinistro],
+  );
+  return linhas.map((l) => ({
+    id_sinidesp: l.id_sinidesp,
+    nome_recibo: l.nome_recibo ?? '',
+    nm_despesa: l.nm_despesa,
+    comple: l.comple ?? '',
+  }));
+}
+
+export async function marcarReciboEnviado(idSinidesp: number): Promise<void> {
+  const db = await getDb();
+  await db.runAsync('update sinidesp_iti set id_despeweb = 1 where id_sinidesp = ?', [idSinidesp]);
 }
 
 export interface Deslocamento {

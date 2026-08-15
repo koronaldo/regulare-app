@@ -1,4 +1,5 @@
 import { getDb } from './client';
+import { registrarLog } from './logs';
 import type { OpcaoLista } from './sinistros';
 
 const LABEL_TIPO_COBERTURA: Record<string, string> = {
@@ -244,6 +245,37 @@ export async function salvarBeneficiario(idSinistro: number, idBeneficio: number
       idSinistro,
     ]);
   });
+
+  await registrarLog(idSinistro, idBeneficio ? 'Beneficiário alterado' : 'Beneficiário inserido');
+}
+
+export interface BeneficiarioTransferencia {
+  id_cobertura: number;
+  quem: string | null;
+  banco: string | null;
+  agencia: string | null;
+  digage: string | null;
+  conta: string | null;
+  digconta: string | null;
+  nm_beneficiario: string | null;
+  cpf_beneficiario: string | null;
+  tip_ben: string | null;
+  id_banco: number | null;
+  tipo_doc: string | null;
+  id_formapag: number | null;
+  id_tipoconta: number | null;
+  nota_ava: number | null;
+}
+
+/** Porta de ConferindoDuplicidadeBeneficiario/CarregaDadosBeneficiarios (transfere_sinistro_def_screen.js). */
+export async function listarBeneficiariosParaTransferencia(idSinistro: number): Promise<BeneficiarioTransferencia[]> {
+  const db = await getDb();
+  return db.getAllAsync<BeneficiarioTransferencia>(
+    `select id_cobertura, quem, banco, agencia, digage, conta, digconta, nm_beneficiario,
+       cpf_beneficiario, tip_ben, id_banco, tipo_doc, id_formapag, id_tipoconta, nota_ava
+     from sinicobbeni where id_sinistro = ?`,
+    [idSinistro],
+  );
 }
 
 /** Porta de RemovendoRegistro (cadbeneficiario_def.js). */

@@ -1,5 +1,16 @@
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, Image, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Image,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
@@ -351,6 +362,13 @@ export default function DespesasScreen() {
         >
           <Ionicons name="grid-outline" size={22} color="#fff" />
         </Pressable>
+        <Pressable
+          onPress={() => router.push({ pathname: '/sinistro/[id]/transferencia', params: { id: String(idSinistro) } })}
+          hitSlop={10}
+          style={styles.botaoVoltar}
+        >
+          <Ionicons name="cloud-upload-outline" size={22} color="#fff" />
+        </Pressable>
       </View>
 
       <View style={styles.segmentado}>
@@ -364,6 +382,7 @@ export default function DespesasScreen() {
         </Pressable>
       </View>
 
+      <KeyboardAvoidingView style={styles.flex1} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <ScrollView contentContainerStyle={styles.conteudo} keyboardShouldPersistTaps="handled">
         {aba === 'despesas' && (
           <>
@@ -501,6 +520,7 @@ export default function DespesasScreen() {
           </Secao>
         )}
       </ScrollView>
+      </KeyboardAvoidingView>
 
       <Modal visible={!!fotoAmpliada} transparent animationType="fade" onRequestClose={() => setFotoAmpliada(null)}>
         <Pressable style={styles.modalFundo} onPress={() => setFotoAmpliada(null)}>
@@ -515,6 +535,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f4f6f8',
+  },
+  flex1: {
+    flex: 1,
   },
   centro: {
     flex: 1,

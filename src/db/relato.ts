@@ -1,4 +1,5 @@
 import { getDb } from './client';
+import { registrarLog } from './logs';
 
 export interface SubtextoRelato {
   id_mobile: number;
@@ -85,6 +86,31 @@ export async function buscarRelato(idSinistro: number, idTexto: number): Promise
   };
 }
 
+/**
+ * Porta de CarregaDadosConstatacoes/CarregaDadosTextos (transfere_sinistro_def_screen.js):
+ * aglutina os subtextos salvos (sinitextomob, na ordem do catálogo) num único texto, separados
+ * por linha em branco — é essa string única que vai para sinitexto.resposta no servidor.
+ * Diferente do legado, ignora subtextos vazios em ambos os casos (lá só o relato-4 fazia isso;
+ * pra constatações-5 o efeito prático era deixar parágrafos em branco no meio do texto).
+ */
+export async function montarTextoConcatenado(idSinistro: number, idTexto: number): Promise<string> {
+  const db = await getDb();
+  const linhas = await db.getAllAsync<{ resposta: string | null }>(
+    `select sm.resposta
+     from sinitextomob sm
+     left join textomob tm on tm.id_texto = sm.id_texto and tm.id_mobile = sm.id_mobile
+     where sm.id_sinistro = ? and sm.id_texto = ?
+     order by tm.ordem`,
+    [idSinistro, idTexto],
+  );
+
+  return linhas
+    .map((linha) => linha.resposta?.trim() ?? '')
+    .filter((resposta) => resposta !== '')
+    .map((resposta) => resposta + '\n\n')
+    .join('');
+}
+
 const BOTAO_POR_TEXTO: Record<number, string> = { 4: 'relato', 5: 'parecer' };
 
 /**
@@ -128,4 +154,6 @@ export async function salvarRelato(
       ]);
     }
   });
+
+  await registrarLog(idSinistro, idTexto === 5 ? 'Constatações do Regulador alterado' : 'Relato do Segurado alterado');
 }

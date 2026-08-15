@@ -1,4 +1,5 @@
 import { getDb } from './client';
+import { registrarLog } from './logs';
 
 export interface InstanciaDocumento {
   grupopag: string;
@@ -267,6 +268,7 @@ export async function inserirPagina(
     await db.runAsync("update sinimob set novo_sini = 'N' where id_sinistro = ?", [idSinistro]);
   });
   await marcarSolicitado(idSinistro, idDocumento);
+  await registrarLog(idSinistro, 'Documento inserido');
 }
 
 /** Porta de RemoveFoto/RemoveDoctoX (digitaliza_def_screen.js). */
@@ -316,9 +318,162 @@ export async function inserirArquivo(idSinistro: number, idDocumento: number, ar
     await db.runAsync("update sinimob set novo_sini = 'N' where id_sinistro = ?", [idSinistro]);
   });
   await marcarSolicitado(idSinistro, idDocumento);
+  await registrarLog(idSinistro, 'Documento inserido');
 }
 
 export async function excluirArquivo(idArquivo: number): Promise<void> {
   const db = await getDb();
   await db.runAsync('delete from sinidocpdf where id_docpdf = ?', [idArquivo]);
+}
+
+// ---- Transferência de documentos ----
+
+export interface InstanciaParaTransferencia {
+  id_documento: number;
+  nm_documento: string;
+  grupopag: string;
+  complemento: string;
+  paginas: { arquivo: string; formato: string }[];
+}
+
+/**
+ * Instâncias fotografadas (sinidocpag) que precisam ir (de novo) pro servidor, agrupadas por
+ * grupopag — cada grupo vira um PDF só na hora da transferência, que substitui (nunca duplica) o
+ * que já estava lá, casando pelo mesmo nome_web (ver atualiza_documento_sinistro.php). Uma
+ * instância entra na lista se TEM ALGUMA página ainda pendente (enviado <> 'E') — mas nesse caso
+ * leva TODAS as suas páginas, não só as novas, pra o PDF reenviado ficar completo e realmente
+ * substituir o anterior (se mandasse só as páginas novas, o reenvio sobrescreveria um documento
+ * de 5 páginas por um de 1 página). grupopag='PDF' é reservado pras Atas/Termos assinadas
+ * (ConferindoAtasTermos no legado), não entra aqui.
+ */
+export async function listarInstanciasParaTransferencia(idSinistro: number): Promise<InstanciaParaTransferencia[]> {
+  const db = await getDb();
+  const linhas = await db.getAllAsync<{
+    id_documento: number;
+    nm_documento: string;
+    grupopag: string;
+    complemento: string | null;
+    nome_arquivo: string | null;
+    formato: string | null;
+  }>(
+    `select sp.id_documento, dc.nm_documento, sp.grupopag, sd.complemento, sp.nome_arquivo, sp.formato
+     from sinidocpag sp
+     inner join documentos dc on dc.id_documento = sp.id_documento
+     left join sinidoc sd on sd.id_sinistro = sp.id_sinistro and sd.id_documento = sp.id_documento
+     where sp.id_sinistro = ? and sp.grupopag <> 'PDF'
+       and exists (
+         select 1 from sinidocpag pendente
+         where pendente.id_sinistro = sp.id_sinistro and pendente.id_documento = sp.id_documento
+           and pendente.grupopag = sp.grupopag and (pendente.enviado is null or pendente.enviado <> 'E')
+       )
+     order by sp.id_documento, sp.grupopag, sp.ordem`,
+    [idSinistro],
+  );
+
+  const mapa = new Map<string, InstanciaParaTransferencia>();
+  for (const l of linhas) {
+    const chave = `${l.id_documento}|${l.grupopag}`;
+    let instancia = mapa.get(chave);
+    if (!instancia) {
+      instancia = {
+        id_documento: l.id_documento,
+        nm_documento: l.nm_documento,
+        grupopag: l.grupopag,
+        complemento: l.complemento ?? '',
+        paginas: [],
+      };
+      mapa.set(chave, instancia);
+    }
+    instancia.paginas.push({ arquivo: l.nome_arquivo ?? '', formato: l.formato || '4' });
+  }
+  return Array.from(mapa.values());
+}
+
+/** Porta de onUploadSuccessPDF (envia_fotos_servidor.js): marca todas as páginas da instância como enviadas. */
+export async function marcarInstanciaEnviada(idSinistro: number, idDocumento: number, grupopag: string): Promise<void> {
+  const db = await getDb();
+  await db.runAsync("update sinidocpag set enviado = 'E' where id_sinistro = ? and id_documento = ? and grupopag = ?", [
+    idSinistro,
+    idDocumento,
+    grupopag,
+  ]);
+}
+
+export interface ArquivoParaTransferencia {
+  id_docpdf: number;
+  id_documento: number;
+  nm_documento: string;
+  nome_arquivo: string;
+  complemento: string;
+}
+
+/**
+ * sinidocpdf guarda tanto arquivos anexados manualmente (DocumentPicker) quanto PDFs de Atas
+ * assinadas (assinar.tsx chama o mesmo inserirArquivo) — ataseg_doc é o catálogo que diz qual
+ * id_documento pertence a qual modelo de ata (por seguradora/produto), então dá pra distinguir
+ * os dois casos sem precisar de uma coluna nova.
+ */
+const CONDICAO_E_ATA = `exists (
+       select 1 from ataseg_doc ad
+       inner join sinimob sm on sm.id_sinistro = sp.id_sinistro
+       where ad.id_documento = sp.id_documento
+         and ad.id_seguradora = sm.id_seguradora
+         and (ad.id_produto = sm.id_produto or ad.id_produto is null)
+     )`;
+
+/** Arquivos já prontos (sinidocpdf, anexados via DocumentPicker) ainda não confirmados no servidor — não inclui Atas/Termos, que têm opção própria. */
+export async function listarArquivosParaTransferencia(idSinistro: number): Promise<ArquivoParaTransferencia[]> {
+  const db = await getDb();
+  const linhas = await db.getAllAsync<{
+    id_docpdf: number;
+    id_documento: number;
+    nm_documento: string;
+    nome_arquivo: string | null;
+    complemento: string | null;
+  }>(
+    `select sp.id_docpdf, sp.id_documento, dc.nm_documento, sp.nome_arquivo, sd.complemento
+     from sinidocpdf sp
+     inner join documentos dc on dc.id_documento = sp.id_documento
+     left join sinidoc sd on sd.id_sinistro = sp.id_sinistro and sd.id_documento = sp.id_documento
+     where sp.id_sinistro = ? and (sp.enviado is null or sp.enviado = 0) and not ${CONDICAO_E_ATA}`,
+    [idSinistro],
+  );
+  return linhas.map((l) => ({
+    id_docpdf: l.id_docpdf,
+    id_documento: l.id_documento,
+    nm_documento: l.nm_documento,
+    nome_arquivo: l.nome_arquivo ?? '',
+    complemento: l.complemento ?? '',
+  }));
+}
+
+export async function marcarArquivoEnviado(idDocpdf: number): Promise<void> {
+  const db = await getDb();
+  await db.runAsync('update sinidocpdf set enviado = 1 where id_docpdf = ?', [idDocpdf]);
+}
+
+/** Atas/Termos assinadas (sinidocpdf, ver CONDICAO_E_ATA) ainda não confirmadas no servidor — opção própria, separada de "Documentos". */
+export async function listarAtasParaTransferencia(idSinistro: number): Promise<ArquivoParaTransferencia[]> {
+  const db = await getDb();
+  const linhas = await db.getAllAsync<{
+    id_docpdf: number;
+    id_documento: number;
+    nm_documento: string;
+    nome_arquivo: string | null;
+    complemento: string | null;
+  }>(
+    `select sp.id_docpdf, sp.id_documento, dc.nm_documento, sp.nome_arquivo, sd.complemento
+     from sinidocpdf sp
+     inner join documentos dc on dc.id_documento = sp.id_documento
+     left join sinidoc sd on sd.id_sinistro = sp.id_sinistro and sd.id_documento = sp.id_documento
+     where sp.id_sinistro = ? and (sp.enviado is null or sp.enviado = 0) and ${CONDICAO_E_ATA}`,
+    [idSinistro],
+  );
+  return linhas.map((l) => ({
+    id_docpdf: l.id_docpdf,
+    id_documento: l.id_documento,
+    nm_documento: l.nm_documento,
+    nome_arquivo: l.nome_arquivo ?? '',
+    complemento: l.complemento ?? '',
+  }));
 }

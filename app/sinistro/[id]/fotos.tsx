@@ -373,6 +373,13 @@ export default function FotosScreen() {
           <Pressable onPress={irParaControle} hitSlop={10} style={styles.botaoControle}>
             <Ionicons name="grid-outline" size={22} color="#fff" />
           </Pressable>
+          <Pressable
+            onPress={() => router.push({ pathname: '/sinistro/[id]/transferencia', params: { id: String(idSinistro) } })}
+            hitSlop={10}
+            style={styles.botaoControle}
+          >
+            <Ionicons name="cloud-upload-outline" size={22} color="#fff" />
+          </Pressable>
         </View>
 
         <View style={styles.segmentado}>

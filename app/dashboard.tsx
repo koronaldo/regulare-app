@@ -4,6 +4,7 @@ import {
   Alert,
   FlatList,
   Linking,
+  Modal,
   Platform,
   Pressable,
   StyleSheet,
@@ -44,6 +45,7 @@ export default function DashboardScreen() {
   const [carregando, setCarregando] = useState(false);
   const [sincronizando, setSincronizando] = useState(false);
   const [expandido, setExpandido] = useState<number | null>(null);
+  const [menuVisivel, setMenuVisivel] = useState(false);
 
   const codregNum = Number(codreg);
 
@@ -130,10 +132,39 @@ export default function DashboardScreen() {
   }
 
   function sair() {
+    setMenuVisivel(false);
     limparCredenciais();
     cancelarVerificacaoPeriodica();
     router.replace('/login');
   }
+
+  function consultarLogs() {
+    setMenuVisivel(false);
+    router.push('/logs');
+  }
+
+  function limparDispositivo() {
+    setMenuVisivel(false);
+    Alert.alert('Limpar Dispositivo', 'Funcionalidade ainda será implementada em uma próxima etapa.');
+  }
+
+  function inserirRoteiros() {
+    setMenuVisivel(false);
+    router.push({ pathname: '/roteiros', params: { codreg: String(codregNum) } });
+  }
+
+  function novosProcessos() {
+    setMenuVisivel(false);
+    sincronizarAgora();
+  }
+
+  const OPCOES_MENU: { chave: string; label: string; icone: keyof typeof Ionicons.glyphMap; onPress: () => void }[] = [
+    { chave: 'novos', label: 'Novos Processos', icone: 'cloud-download-outline', onPress: novosProcessos },
+    { chave: 'logs', label: 'Consultar Logs', icone: 'document-text-outline', onPress: consultarLogs },
+    { chave: 'roteiros', label: 'Inserir Roteiros', icone: 'map-outline', onPress: inserirRoteiros },
+    { chave: 'limpar', label: 'Limpar Dispositivo', icone: 'trash-outline', onPress: limparDispositivo },
+    { chave: 'sair', label: 'Sair', icone: 'log-out-outline', onPress: sair },
+  ];
 
   const labelAba = ABAS.find((a) => a.valor === situacao)?.label ?? '';
 
@@ -153,18 +184,28 @@ export default function DashboardScreen() {
           </Text>
         </View>
         <View style={styles.headerAcoes}>
-          <Pressable onPress={sincronizarAgora} style={styles.botaoSair} hitSlop={10} disabled={sincronizando}>
+          <Pressable onPress={() => setMenuVisivel(true)} style={styles.botaoSair} hitSlop={10} disabled={sincronizando}>
             {sincronizando ? (
               <ActivityIndicator color="#fff" size="small" />
             ) : (
-              <Ionicons name="cloud-download-outline" size={22} color="#fff" />
+              <Ionicons name="ellipsis-vertical" size={22} color="#fff" />
             )}
-          </Pressable>
-          <Pressable onPress={sair} style={styles.botaoSair} hitSlop={10}>
-            <Ionicons name="log-out-outline" size={22} color="#fff" />
           </Pressable>
         </View>
       </View>
+
+      <Modal visible={menuVisivel} transparent animationType="fade" onRequestClose={() => setMenuVisivel(false)}>
+        <Pressable style={styles.menuFundo} onPress={() => setMenuVisivel(false)}>
+          <View style={styles.menuCard}>
+            {OPCOES_MENU.map((opcao) => (
+              <Pressable key={opcao.chave} style={styles.menuItem} onPress={opcao.onPress}>
+                <Ionicons name={opcao.icone} size={18} color="#1c3d5a" />
+                <Text style={styles.menuItemTexto}>{opcao.label}</Text>
+              </Pressable>
+            ))}
+          </View>
+        </Pressable>
+      </Modal>
 
       <View style={styles.abas}>
         {ABAS.map((aba) => (
@@ -369,6 +410,36 @@ const styles = StyleSheet.create({
   },
   botaoSair: {
     padding: 4,
+  },
+  menuFundo: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.25)',
+  },
+  menuCard: {
+    position: 'absolute',
+    top: Platform.OS === 'ios' ? 90 : 60,
+    right: 16,
+    backgroundColor: '#fff',
+    borderRadius: 10,
+    paddingVertical: 6,
+    minWidth: 200,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 3 },
+  },
+  menuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+  },
+  menuItemTexto: {
+    fontSize: 14,
+    color: '#1c3d5a',
+    fontWeight: '600',
   },
   abas: {
     flexDirection: 'row',

@@ -1,4 +1,5 @@
 import { getDb } from './client';
+import { registrarLog } from './logs';
 import type { OpcaoLista } from './sinistros';
 
 export const OPCOES_TIPO_COBERTURA: OpcaoLista[] = [
@@ -163,6 +164,8 @@ export async function salvarCobertura(
       idSinistro,
     ]);
   });
+
+  await registrarLog(idSinistro, idSinicob ? 'Cobertura alterada' : 'Cobertura inserida');
 }
 
 const LABEL_PENDENCIA: Record<string, string> = {
@@ -192,4 +195,32 @@ export async function verificarPendenciasCobertura(idSinistro: number, idCobertu
 export async function excluirCobertura(idSinistro: number, idSinicob: number): Promise<void> {
   const db = await getDb();
   await db.runAsync('delete from sinimobcob where id_sinistro = ? and id_sinicob = ?', [idSinistro, idSinicob]);
+}
+
+export interface CoberturaTransferencia {
+  id_cobertura: number;
+  verba_unica: number | null;
+  porteira: number | null;
+  perc_predio: string | number | null;
+  perc_conteudo: string | number | null;
+  item_apolice: string | null;
+  nro_cob: string | null;
+  complemento: string | null;
+  vlr_cobertura: string | number | null;
+  perc_franquia: string | number | null;
+  vlr_franquia: string | number | null;
+  vlr_cob_estima: string | number | null;
+  reclamado: string | null;
+  texto_cg: string | null;
+}
+
+/** Porta de ConferindoDuplicidadeCobertura/CarregaDadosCobertura (transfere_sinistro_def_screen.js). */
+export async function listarCoberturasParaTransferencia(idSinistro: number): Promise<CoberturaTransferencia[]> {
+  const db = await getDb();
+  return db.getAllAsync<CoberturaTransferencia>(
+    `select id_cobertura, verba_unica, porteira, perc_predio, perc_conteudo, item_apolice, nro_cob,
+       complemento, vlr_cobertura, perc_franquia, vlr_franquia, vlr_cob_estima, reclamado, texto_cg
+     from sinimobcob where id_sinistro = ?`,
+    [idSinistro],
+  );
 }

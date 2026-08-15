@@ -1,4 +1,5 @@
 import { getDb } from './client';
+import { registrarLog } from './logs';
 
 export interface SubItemPlanilha {
   id_planilha: number;
@@ -150,6 +151,8 @@ export async function salvarSubItem(
       idSinistro,
     ]);
   });
+
+  await registrarLog(idSinistro, idPlanilha ? 'Item de Planilha alterado' : 'Item de Planilha inserido');
 }
 
 /** Porta de AlteraNomeItem (cadplanilha_def.js): renomeia o item pai pra todos os subitens do grupo. */
@@ -169,6 +172,27 @@ export async function excluirSubItem(idSinistro: number, idCobertura: number, id
     idCobertura,
     idPlanilha,
   ]);
+}
+
+export interface ItemPlanilhaTransferencia {
+  id_cobertura: number;
+  id_plaweb: number | null;
+  grupoitem: string | null;
+  nm_planilha: string | null;
+  qtde: string | number | null;
+  vlr_uni_apr: string | number | null;
+  vlr_tot_apr: string | number | null;
+  nm_planilha_item: string | null;
+}
+
+/** Porta de ConferindoPlanilhaApuracao/CarregaDadosPlanilha (transfere_sinistro_def_screen.js). */
+export async function listarItensPlanilhaParaTransferencia(idSinistro: number): Promise<ItemPlanilhaTransferencia[]> {
+  const db = await getDb();
+  return db.getAllAsync<ItemPlanilhaTransferencia>(
+    `select id_cobertura, id_plaweb, grupoitem, nm_planilha, qtde, vlr_uni_apr, vlr_tot_apr, nm_planilha_item
+     from planilha_apuracao where id_sinistro = ?`,
+    [idSinistro],
+  );
 }
 
 /** Exclui o item inteiro (todos os subitens do grupo) — conveniência sobre o legado, que só excluía subitem a subitem. */

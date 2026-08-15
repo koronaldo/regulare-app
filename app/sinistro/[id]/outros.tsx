@@ -2,6 +2,7 @@ import { useCallback, useRef, useState, type RefObject } from 'react';
 import {
   ActivityIndicator,
   findNodeHandle,
+  KeyboardAvoidingView,
   Platform,
   Pressable,
   ScrollView,
@@ -365,8 +366,16 @@ export default function OutrosSegurosScreen() {
         >
           <Ionicons name="grid-outline" size={22} color="#fff" />
         </Pressable>
+        <Pressable
+          onPress={() => router.push({ pathname: '/sinistro/[id]/transferencia', params: { id: String(idSinistro) } })}
+          hitSlop={10}
+          style={styles.botaoVoltar}
+        >
+          <Ionicons name="cloud-upload-outline" size={22} color="#fff" />
+        </Pressable>
       </View>
 
+      <KeyboardAvoidingView style={styles.flex1} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <ScrollView ref={scrollRef} contentContainerStyle={styles.conteudo} keyboardShouldPersistTaps="handled">
         <Secao titulo="Possui outros seguros?">
           <Interruptor label="Possui outros seguros?" valor={possuiOutros} onChange={mudarPossuiOutros} />
@@ -505,6 +514,7 @@ export default function OutrosSegurosScreen() {
           <Ionicons name="chevron-forward" size={20} color="#1c3d5a" />
         </Pressable>
       </View>
+      </KeyboardAvoidingView>
     </View>
   );
 }
@@ -513,6 +523,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f4f6f8',
+  },
+  flex1: {
+    flex: 1,
   },
   centro: {
     flex: 1,

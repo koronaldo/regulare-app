@@ -1,4 +1,5 @@
 import { getDb } from './client';
+import { registrarLog } from './logs';
 import type { OpcaoLista } from './sinistros';
 
 export type TipoApolice = 'PRE' | 'MAQ' | string;
@@ -137,6 +138,8 @@ export async function salvarItensApolice(idSinistro: number, respostas: Resposta
       idSinistro,
     ]);
   });
+
+  await registrarLog(idSinistro, 'Informações Gerais alterado');
 }
 
 export interface Benfeitoria {
@@ -281,12 +284,108 @@ export async function salvarBenfeitoria(
 
     await db.runAsync("update sinimob set novo_sini = 'N' where id_sinistro = ?", [idSinistro]);
   });
+
+  await registrarLog(idSinistro, idSinibenfe ? 'Benfeitoria alterada' : 'Benfeitoria inserida');
 }
 
 /** Porta de RemovendoRegistro (cadinformacoes_def.js). */
 export async function excluirBenfeitoria(idSinistro: number, idSinibenfe: number): Promise<void> {
   const db = await getDb();
   await db.runAsync('delete from sinibenfe where id_sinistro = ? and id_sinibenfe = ?', [idSinistro, idSinibenfe]);
+}
+
+export interface BenfeitoriaTransferencia {
+  id_sinibenfe: number;
+  id_benfeweb: number | null;
+  construcao: string | null;
+  id_ocupacao: number | null;
+  area: string | number | null;
+  idade: string | number | null;
+  danos: number | null;
+  nm_benfeito: string | null;
+  id_estrutura: number | null;
+  id_parede: number | null;
+  id_tipocobertura: number | null;
+  id_esquadria: number | null;
+  tipo_bene: string | null;
+  marca: string | null;
+  modelo: string | null;
+  nro_serie: string | null;
+  chassi: string | null;
+  ano: string | null;
+  placa: string | null;
+  total_km: string | number | null;
+  item_apolice: string | null;
+  cor: string | null;
+  coord_lat: string | null;
+  coord_long: string | null;
+  id_cobertura: number | null;
+}
+
+/**
+ * Porta de ConferindoDuplicidadeBenfeitoria (transfere_sinistro_def_screen.js), estendida pra
+ * cobrir também tipo_bene='MAQ': o legado só mandava as benfeitorias (PRE) por esse caminho,
+ * mas aqui as máquinas usam a mesma insere_benfeitoria_web(...) pro cadastro base — o checklist
+ * delas (sinistro_maquina) é sincronizado à parte, depois que a máquina já tem id_benfeweb.
+ */
+export async function listarBenfeitoriasParaTransferencia(idSinistro: number): Promise<BenfeitoriaTransferencia[]> {
+  const db = await getDb();
+  return db.getAllAsync<BenfeitoriaTransferencia>(
+    `select id_sinibenfe, id_benfeweb, construcao, id_ocupacao, area, idade, danos, nm_benfeito,
+       id_estrutura, id_parede, id_tipocobertura, id_esquadria, tipo_bene, marca, modelo, nro_serie,
+       chassi, ano, placa, total_km, item_apolice, cor, coord_lat, coord_long, id_cobertura
+     from sinibenfe where id_sinistro = ?`,
+    [idSinistro],
+  );
+}
+
+/**
+ * Porta de AtualizaChavesBenfeitoria (transfere_sinistro_def_screen.js): grava o id_benfeweb
+ * (chave real, gerada pelo servidor) devolvido depois do envio, casando pelo id_sinibenfe local.
+ */
+export async function marcarBenfeitoriasTransferidas(
+  idSinistro: number,
+  chaves: { id_sinibenfe: number; id_benfeweb: number }[],
+): Promise<void> {
+  const db = await getDb();
+  await db.withTransactionAsync(async () => {
+    for (const chave of chaves) {
+      await db.runAsync('update sinibenfe set id_benfeweb = ? where id_sinistro = ? and id_sinibenfe = ?', [
+        chave.id_benfeweb,
+        idSinistro,
+        chave.id_sinibenfe,
+      ]);
+    }
+  });
+}
+
+export interface ChecklistMaquinaTransferencia {
+  /** id_benmaq já resolvido pro servidor (sinibenfe.id_benfeweb da máquina dona do checklist) — nunca o id_sinibenfe local. */
+  id_benmaq_servidor: number;
+  id_itemmaq: number;
+  descricao: string | null;
+  confere: number | null;
+  complemento: string | null;
+}
+
+/**
+ * Porta de LendoDadosInformacoesMaquinas/CarregaDadosInformacoesMaquinas
+ * (transfere_sinistro_def_screen.js): lê o checklist de cada máquina (sinistro_maquina), já
+ * resolvendo o id_benmaq local (que localmente é o id_sinibenfe) pro id_benfeweb real do
+ * servidor via o join com sinibenfe — só entram máquinas que já têm id_benfeweb (ou seja, que
+ * já foram sincronizadas por transferirBenfeitorias nesta mesma rodada).
+ */
+export async function listarChecklistMaquinasParaTransferencia(
+  idSinistro: number,
+): Promise<ChecklistMaquinaTransferencia[]> {
+  const db = await getDb();
+  return db.getAllAsync<ChecklistMaquinaTransferencia>(
+    `select sb.id_benfeweb as id_benmaq_servidor, sm.id_itemmaq, sm.descricao, sm.confere, sm.complemento
+     from sinistro_maquina sm
+     inner join sinibenfe sb on sb.id_sinibenfe = sm.id_benmaq and sb.id_sinistro = sm.id_sinistro
+     where sm.id_sinistro = ? and sb.id_benfeweb is not null and sb.id_benfeweb > 0`,
+    [idSinistro],
+  );
 }
 
 export async function listarOpcoesOcupacao(): Promise<OpcaoLista[]> {
@@ -468,6 +567,7 @@ export async function criarMaquina(idSinistro: number): Promise<number> {
     "insert into sinibenfe (id_benfeweb, id_sinistro, id_benfeito, tipo_bene, nm_benfeito) values (0, ?, 0, 'MAQ', '')",
     [idSinistro],
   );
+  await registrarLog(idSinistro, 'Máquina inserida');
   return result.lastInsertRowId;
 }
 
@@ -528,4 +628,45 @@ export async function salvarMaquina(
       idSinistro,
     ]);
   });
+
+  await registrarLog(idSinistro, 'Máquina alterada');
+}
+
+// ---- Transferência de "Informações Gerais" (sinirisco + sinistro_apolice) ----
+// Porta de LendoDadosInformacoes/CarregaDadosInformacoes e
+// LendoDadosInformacoesNovas/CarregaDadosInformacoesNovas (transfere_sinistro_def_screen.js).
+
+export interface RiscoTransferencia {
+  id_risco: number;
+  estado: number | null;
+  complem: string | null;
+  id_seguradora: number | null;
+}
+
+export async function listarRiscosParaTransferencia(idSinistro: number): Promise<RiscoTransferencia[]> {
+  const db = await getDb();
+  return db.getAllAsync<RiscoTransferencia>(
+    'select id_risco, estado, complem, id_seguradora from sinirisco where id_sinistro = ?',
+    [idSinistro],
+  );
+}
+
+export interface ItemApoliceTransferencia {
+  id_item: number;
+  descricao: string | null;
+  confere: number | null;
+  complemento: string | null;
+  id_estado: string | null;
+  id_cidade: number | null;
+  id_estado_ori: string | null;
+  id_cidade_ori: number | null;
+}
+
+export async function listarItensApoliceParaTransferencia(idSinistro: number): Promise<ItemApoliceTransferencia[]> {
+  const db = await getDb();
+  return db.getAllAsync<ItemApoliceTransferencia>(
+    `select id_item, descricao, confere, complemento, id_estado, id_cidade, id_estado_ori, id_cidade_ori
+     from sinistro_apolice where id_sinistro = ?`,
+    [idSinistro],
+  );
 }

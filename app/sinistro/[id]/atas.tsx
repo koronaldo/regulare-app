@@ -82,6 +82,13 @@ export default function AtasScreen() {
         >
           <Ionicons name="grid-outline" size={22} color="#fff" />
         </Pressable>
+        <Pressable
+          onPress={() => router.push({ pathname: '/sinistro/[id]/transferencia', params: { id: String(idSinistro) } })}
+          hitSlop={10}
+          style={styles.botaoVoltar}
+        >
+          <Ionicons name="cloud-upload-outline" size={22} color="#fff" />
+        </Pressable>
       </View>
 
       <ScrollView contentContainerStyle={styles.conteudo}>

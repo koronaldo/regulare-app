@@ -1,6 +1,7 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 
 import { getDb } from './client';
+import { registrarLogEmLote } from './logs';
 
 type Row = Record<string, unknown>;
 type BindValue = string | number | null;
@@ -750,6 +751,18 @@ async function batchDeleteByKeys(db: SQLiteDatabase, table: string, keyColumns: 
 async function importSinistros(db: SQLiteDatabase, json: Record<string, any>) {
   if (json.result_sini !== true) return;
   const rows = rowsFromResponse(json, 'dados_sini', 'total_sini');
+  if (rows.length === 0) return;
+
+  // Detecta quais processos ainda não existem localmente (sinimob usa insert or ignore) antes de
+  // inserir, pra registrar o log "Importado o aplicativo" só na primeira vez que cada um chega.
+  const idsRecebidos = rows.map((r) => Number(n(r.id_sinistro)));
+  const placeholders = idsRecebidos.map(() => '?').join(',');
+  const existentes = await db.getAllAsync<{ id_sinistro: number }>(
+    `select id_sinistro from sinimob where id_sinistro in (${placeholders})`,
+    idsRecebidos,
+  );
+  const idsExistentes = new Set(existentes.map((e) => e.id_sinistro));
+  const idsNovos = idsRecebidos.filter((id) => !idsExistentes.has(id));
 
   await batchInsert(db, 'sinimob', SINIMOB_COLUMNS, rows.map(sinimobValues));
 
@@ -761,6 +774,10 @@ async function importSinistros(db: SQLiteDatabase, json: Record<string, any>) {
     }
   }
   await batchInsert(db, 'btn_permissoes', botaoColumns, botaoRows);
+
+  if (idsNovos.length > 0) {
+    await registrarLogEmLote(idsNovos, 'Importado o aplicativo');
+  }
 }
 
 async function runSimpleImport(db: SQLiteDatabase, json: Record<string, any>, spec: ImportSpec) {

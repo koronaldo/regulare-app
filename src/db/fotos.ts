@@ -1,4 +1,5 @@
 import { getDb } from './client';
+import { registrarLog } from './logs';
 
 export interface LegendaFoto {
   id_legendaf: number;
@@ -94,12 +95,17 @@ export async function inserirFoto(idSinistro: number, dados: NovaFoto): Promise<
       idSinistro,
     ]);
   });
+  await registrarLog(idSinistro, 'Foto inserida');
 }
 
 /** Porta de AlteraLegenda (tirarfotos_def_screen.js, dentro de RenomeiaFoto). */
 export async function renomearFoto(idFoto: number, novaLegenda: string): Promise<void> {
   const db = await getDb();
   await db.runAsync('update sinifotoapp set legenda = ? where id_foto = ?', [novaLegenda, idFoto]);
+  const linha = await db.getFirstAsync<{ id_sinistro: number }>('select id_sinistro from sinifotoapp where id_foto = ?', [
+    idFoto,
+  ]);
+  if (linha) await registrarLog(linha.id_sinistro, 'Foto alterada');
 }
 
 /** Usado ao girar a foto (funcionalidade nova): troca o arquivo (já rotacionado) e a posição. */
@@ -116,6 +122,38 @@ export async function atualizarArquivoFoto(idFoto: number, novoArquivo: string, 
 export async function excluirFoto(idFoto: number): Promise<void> {
   const db = await getDb();
   await db.runAsync('delete from sinifotoapp where id_foto = ?', [idFoto]);
+}
+
+/** Fotos ainda não confirmadas no servidor (situacao <> 'E'), na ordem em que devem ser enviadas. */
+export async function listarFotosParaTransferencia(idSinistro: number): Promise<FotoResumo[]> {
+  const db = await getDb();
+  const linhas = await db.getAllAsync<{
+    id_foto: number;
+    arquivo: string | null;
+    legenda: string | null;
+    situacao: string | null;
+    posicao: string | null;
+    ordem: number | string | null;
+  }>(
+    `select id_foto, arquivo, legenda, situacao, posicao, ordem from sinifotoapp
+     where id_sinistro = ? and (situacao is null or situacao <> 'E')
+     order by ordem`,
+    [idSinistro],
+  );
+  return linhas.map((l) => ({
+    id_foto: l.id_foto,
+    arquivo: l.arquivo ?? '',
+    legenda: l.legenda ?? '',
+    situacao: l.situacao ?? 'P',
+    posicao: l.posicao ?? 'R',
+    ordem: l.ordem != null ? Number(l.ordem) : 0,
+  }));
+}
+
+/** Porta de onUploadSuccess (envia_fotos_servidor.js): marca a foto como transferida com sucesso. */
+export async function marcarFotoEnviada(idFoto: number): Promise<void> {
+  const db = await getDb();
+  await db.runAsync("update sinifotoapp set situacao = 'E' where id_foto = ?", [idFoto]);
 }
 
 /** Porta de AtualizaTodas (tirarfotos_def_screen.js): renumera ordem sequencialmente após arrastar. */

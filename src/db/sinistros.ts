@@ -1,4 +1,5 @@
 import { getDb } from './client';
+import { registrarLog } from './logs';
 
 /**
  * Porta da montagem de `sini_cad` (definicoes.js): lista os sinistros já salvos localmente,
@@ -28,6 +29,30 @@ export async function idsSinistrosLocais(): Promise<Set<number>> {
   } catch {
     return new Set();
   }
+}
+
+export interface SinistroRoteiro {
+  id_sinistro: number;
+  nro_sinistro: string | null;
+  nm_segurado: string | null;
+  endereco: string | null;
+  nro_predio: string | null;
+  bairro: string | null;
+  cep: string | null;
+  nm_cidade: string | null;
+  id_estado: string | null;
+}
+
+/** Porta da tela "Roteiros": só processos pendentes (sem data de vistoria), pra montar um trajeto. */
+export async function listarSinistrosParaRoteiro(codreg: number): Promise<SinistroRoteiro[]> {
+  const db = await getDb();
+  return db.getAllAsync<SinistroRoteiro>(
+    `select id_sinistro, nro_sinistro, nm_segurado, endereco, nro_predio, bairro, cep, nm_cidade, id_estado
+     from sinimob
+     where id_regulador = ? and data_vistoria is null
+     order by nm_cidade, bairro, cep`,
+    [codreg],
+  );
 }
 
 export type SituacaoSinistro = 'P' | 'A' | 'T';
@@ -308,6 +333,12 @@ const BOTOES_LIBERADOS_APOS_CADASTRO = ['fotos', 'docs', 'despesas', 'videos', '
 export async function salvarCadastroSinistro(idSinistro: number, dados: DadosCadastro): Promise<void> {
   const db = await getDb();
 
+  const antes = await db.getFirstAsync<{ data_vistoria: string | null }>(
+    'select data_vistoria from sinimob where id_sinistro = ?',
+    [idSinistro],
+  );
+  const vistoriaNova = !antes?.data_vistoria && !!dados.data_vistoria;
+
   await db.withTransactionAsync(async () => {
     await db.runAsync(
       `update sinimob set
@@ -341,4 +372,9 @@ export async function salvarCadastroSinistro(idSinistro: number, dados: DadosCad
       [idSinistro, ...BOTOES_LIBERADOS_APOS_CADASTRO],
     );
   });
+
+  await registrarLog(idSinistro, 'Cadastro Geral alterado');
+  if (vistoriaNova) {
+    await registrarLog(idSinistro, 'Vistoria realizada');
+  }
 }

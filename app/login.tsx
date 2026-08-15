@@ -66,7 +66,7 @@ export default function LoginScreen() {
       end={{ x: 0.82, y: 1 }}
       style={styles.container}
     >
-      <KeyboardAvoidingView style={styles.form} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardAvoidingView style={styles.form} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <StatusBar style="light" />
 
         <View style={styles.header}>

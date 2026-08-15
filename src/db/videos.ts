@@ -1,4 +1,5 @@
 import { getDb } from './client';
+import { registrarLog } from './logs';
 
 export interface LegendaVideo {
   id_legendaf: number;
@@ -84,16 +85,51 @@ export async function inserirVideo(idSinistro: number, dados: NovoVideo): Promis
       idSinistro,
     ]);
   });
+  await registrarLog(idSinistro, 'Vídeo/Áudio inserido');
 }
 
 /** Porta de AlteraLegenda (capturavideo_def_screen.js, dentro de RenomeiaVideo). */
 export async function renomearVideo(idVideo: number, novaLegenda: string): Promise<void> {
   const db = await getDb();
   await db.runAsync('update sinivideoapp set legenda = ? where id_video = ?', [novaLegenda, idVideo]);
+  const linha = await db.getFirstAsync<{ id_sinistro: number }>('select id_sinistro from sinivideoapp where id_video = ?', [
+    idVideo,
+  ]);
+  if (linha) await registrarLog(linha.id_sinistro, 'Vídeo/Áudio alterado');
 }
 
 /** Porta de RemoveVideoX (capturavideo_def_screen.js). */
 export async function excluirVideo(idVideo: number): Promise<void> {
   const db = await getDb();
   await db.runAsync('delete from sinivideoapp where id_video = ?', [idVideo]);
+}
+
+/** Vídeos ainda não confirmados no servidor (situacao <> 'E'), na ordem em que devem ser enviados. */
+export async function listarVideosParaTransferencia(idSinistro: number): Promise<VideoResumo[]> {
+  const db = await getDb();
+  const linhas = await db.getAllAsync<{
+    id_video: number;
+    arquivo: string | null;
+    legenda: string | null;
+    situacao: string | null;
+    ordem: number | string | null;
+  }>(
+    `select id_video, arquivo, legenda, situacao, ordem from sinivideoapp
+     where id_sinistro = ? and (situacao is null or situacao <> 'E')
+     order by ordem`,
+    [idSinistro],
+  );
+  return linhas.map((l) => ({
+    id_video: l.id_video,
+    arquivo: l.arquivo ?? '',
+    legenda: l.legenda ?? '',
+    situacao: l.situacao ?? 'P',
+    ordem: l.ordem != null ? Number(l.ordem) : 0,
+  }));
+}
+
+/** Porta de onUploadSuccessVideo (envia_fotos_servidor.js): marca o vídeo como transferido com sucesso. */
+export async function marcarVideoEnviado(idVideo: number): Promise<void> {
+  const db = await getDb();
+  await db.runAsync("update sinivideoapp set situacao = 'E' where id_video = ?", [idVideo]);
 }

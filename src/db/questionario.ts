@@ -152,3 +152,22 @@ export async function limparResposta(idSinistro: number, idPerprod: number): Pro
   const db = await getDb();
   await db.runAsync('delete from sini_prod where id_sinistro = ? and id_perprod = ?', [idSinistro, idPerprod]);
 }
+
+export interface RespostaQuestionarioTransferencia {
+  id_resprod: number;
+  nm_terce: string | null;
+  cpf_terce: string | null;
+  complemento: string | null;
+  id_perprod: number;
+}
+
+/** Porta de LendoDadosQuestionario/CarregaDadosQuestionario (transfere_sinistro_def_screen.js). */
+export async function listarRespostasQuestionarioParaTransferencia(
+  idSinistro: number,
+): Promise<RespostaQuestionarioTransferencia[]> {
+  const db = await getDb();
+  return db.getAllAsync<RespostaQuestionarioTransferencia>(
+    'select id_resprod, nm_terce, cpf_terce, complemento, id_perprod from sini_prod where id_sinistro = ? order by id_perprod, id_resprod',
+    [idSinistro],
+  );
+}

@@ -6,13 +6,41 @@ import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
+  atualizarStatusTransferencia,
+  ID_TEXTO_POR_TIPOTRANS,
+  ID_TIPOTRANS_ATAS,
+  ID_TIPOTRANS_BENEFICIARIOS,
+  ID_TIPOTRANS_BENFEITORIAS,
+  ID_TIPOTRANS_CADASTRO,
+  ID_TIPOTRANS_COBERTURAS,
+  ID_TIPOTRANS_DOCUMENTOS,
+  ID_TIPOTRANS_FOTOS,
   ID_TIPOTRANS_INFORMACOES,
+  ID_TIPOTRANS_OUTROSEG,
+  ID_TIPOTRANS_PLANILHA,
+  ID_TIPOTRANS_QUESTIONARIO,
+  ID_TIPOTRANS_RECIBOS,
+  ID_TIPOTRANS_VIDEOS,
   informacoesCompletas,
   listarStatusTransferencia,
   type ItemTransferencia,
 } from '../../../src/db/transferencia';
 import { buscarSinistroPorId } from '../../../src/db/sinistros';
+import { registrarLog } from '../../../src/db/logs';
 import { mostrarAlerta } from '../../../src/utils/alerta';
+import { transferirDadosCadastrais } from '../../../src/services/transferenciaCadastro';
+import { transferirTexto } from '../../../src/services/transferenciaTextos';
+import { transferirBenfeitorias } from '../../../src/services/transferenciaBenfeitorias';
+import { transferirInformacoesGerais } from '../../../src/services/transferenciaInformacoes';
+import { transferirQuestionario } from '../../../src/services/transferenciaQuestionario';
+import { transferirCoberturas } from '../../../src/services/transferenciaCoberturas';
+import { transferirBeneficiarios } from '../../../src/services/transferenciaBeneficiarios';
+import { transferirPlanilha } from '../../../src/services/transferenciaPlanilha';
+import { transferirOutrosSeguros } from '../../../src/services/transferenciaOutrosSeguros';
+import { transferirFotos } from '../../../src/services/transferenciaFotos';
+import { transferirDocumentos, transferirAtas } from '../../../src/services/transferenciaDocumentos';
+import { transferirVideos } from '../../../src/services/transferenciaVideos';
+import { transferirRecibos } from '../../../src/services/transferenciaRecibos';
 
 export default function TransferenciaScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -24,6 +52,7 @@ export default function TransferenciaScreen() {
   const [itens, setItens] = useState<ItemTransferencia[]>([]);
   const [informacoesOk, setInformacoesOk] = useState(true);
   const [selecionados, setSelecionados] = useState<Set<number>>(new Set());
+  const [transferindo, setTransferindo] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -67,12 +96,86 @@ export default function TransferenciaScreen() {
     });
   }
 
-  function transferir() {
+  async function transferir() {
     if (selecionados.size === 0) {
       mostrarAlerta('Nada selecionado', 'Selecione ao menos um item para transferir.');
       return;
     }
-    mostrarAlerta('Transferir para o servidor', 'Esta funcionalidade ainda será implementada em uma próxima etapa.');
+
+    setTransferindo(true);
+    try {
+      const sucessos: string[] = [];
+      const falhas: string[] = [];
+      const naoImplementados: string[] = [];
+
+      for (const item of itens) {
+        if (!selecionados.has(item.id_tipotrans)) continue;
+
+        let resultado: { sucesso: boolean; mensagem: string } | null = null;
+
+        if (item.id_tipotrans === ID_TIPOTRANS_CADASTRO) {
+          resultado = await transferirDadosCadastrais(idSinistro);
+        } else if (item.id_tipotrans in ID_TEXTO_POR_TIPOTRANS) {
+          resultado = await transferirTexto(idSinistro, ID_TEXTO_POR_TIPOTRANS[item.id_tipotrans]);
+        } else if (item.id_tipotrans === ID_TIPOTRANS_BENFEITORIAS) {
+          resultado = await transferirBenfeitorias(idSinistro);
+        } else if (item.id_tipotrans === ID_TIPOTRANS_INFORMACOES) {
+          resultado = await transferirInformacoesGerais(idSinistro);
+        } else if (item.id_tipotrans === ID_TIPOTRANS_QUESTIONARIO) {
+          resultado = await transferirQuestionario(idSinistro);
+        } else if (item.id_tipotrans === ID_TIPOTRANS_COBERTURAS) {
+          resultado = await transferirCoberturas(idSinistro);
+        } else if (item.id_tipotrans === ID_TIPOTRANS_BENEFICIARIOS) {
+          resultado = await transferirBeneficiarios(idSinistro);
+        } else if (item.id_tipotrans === ID_TIPOTRANS_PLANILHA) {
+          resultado = await transferirPlanilha(idSinistro);
+        } else if (item.id_tipotrans === ID_TIPOTRANS_OUTROSEG) {
+          resultado = await transferirOutrosSeguros(idSinistro);
+        } else if (item.id_tipotrans === ID_TIPOTRANS_FOTOS) {
+          resultado = await transferirFotos(idSinistro);
+        } else if (item.id_tipotrans === ID_TIPOTRANS_DOCUMENTOS) {
+          resultado = await transferirDocumentos(idSinistro);
+        } else if (item.id_tipotrans === ID_TIPOTRANS_ATAS) {
+          resultado = await transferirAtas(idSinistro);
+        } else if (item.id_tipotrans === ID_TIPOTRANS_VIDEOS) {
+          resultado = await transferirVideos(idSinistro);
+        } else if (item.id_tipotrans === ID_TIPOTRANS_RECIBOS) {
+          resultado = await transferirRecibos(idSinistro);
+        }
+
+        if (!resultado) {
+          naoImplementados.push(item.nm_tipotrans);
+          continue;
+        }
+
+        await atualizarStatusTransferencia(idSinistro, item.id_tipotrans, resultado.sucesso ? 'S' : 'E');
+        if (resultado.sucesso) sucessos.push(item.nm_tipotrans);
+        else falhas.push(`${item.nm_tipotrans}: ${resultado.mensagem}`);
+      }
+
+      const lista = await listarStatusTransferencia(idSinistro);
+      setItens(lista);
+      setSelecionados(new Set(lista.filter((item) => item.status_trans !== 'S').map((item) => item.id_tipotrans)));
+
+      if (sucessos.length > 0) {
+        await registrarLog(idSinistro, 'Transferido para servidor');
+      }
+
+      if (falhas.length > 0) {
+        mostrarAlerta('Erro ao transferir', falhas.join('\n\n'));
+      } else if (sucessos.length > 0 && naoImplementados.length === 0) {
+        mostrarAlerta('Transferência concluída', `${sucessos.join(', ')} enviado(s) com sucesso.`);
+      } else if (sucessos.length > 0) {
+        mostrarAlerta(
+          'Transferência parcial',
+          `${sucessos.join(', ')} enviado(s) com sucesso. Ainda não implementado: ${naoImplementados.join(', ')}.`,
+        );
+      } else {
+        mostrarAlerta('Ainda não implementado', `Em uma próxima etapa: ${naoImplementados.join(', ')}.`);
+      }
+    } finally {
+      setTransferindo(false);
+    }
   }
 
   function voltar() {
@@ -138,9 +241,17 @@ export default function TransferenciaScreen() {
       </ScrollView>
 
       <View style={[styles.rodape, { paddingBottom: Math.max(insets.bottom, 16) }]}>
-        <Pressable style={styles.botaoTransferir} onPress={transferir}>
-          <Ionicons name="radio-outline" size={20} color="#fff" />
-          <Text style={styles.botaoTransferirTexto}>Transferir</Text>
+        <Pressable
+          style={[styles.botaoTransferir, transferindo && styles.botaoTransferirDesabilitado]}
+          onPress={transferir}
+          disabled={transferindo}
+        >
+          {transferindo ? (
+            <ActivityIndicator color="#fff" size="small" />
+          ) : (
+            <Ionicons name="radio-outline" size={20} color="#fff" />
+          )}
+          <Text style={styles.botaoTransferirTexto}>{transferindo ? 'Transferindo…' : 'Transferir'}</Text>
         </Pressable>
       </View>
     </View>
@@ -250,5 +361,8 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '700',
     fontSize: 15,
+  },
+  botaoTransferirDesabilitado: {
+    opacity: 0.7,
   },
 });

@@ -273,6 +273,15 @@ create table if not exists sinicobbeni(id_beneficio integer primary key autoincr
   quem varchar(50), banco varchar(60), agencia varchar(60), conta varchar(60), nm_beneficiario varchar(120),
   cpf_beneficiario varchar(20), tip_ben char(1), id_banco integer, tipo_doc char(1), id_formapag integer,
   id_tipoconta integer, digage varchar(3), digconta varchar(3), id_beneweb integer, nota_ava smallint);
+
+/** Log de eventos do processo no aparelho (sem equivalente no legado — só local). */
+create table if not exists sinistro_log(
+  id_log integer primary key autoincrement not null,
+  id_sinistro integer,
+  data_hora varchar(19),
+  acao varchar(60));
+
+create index if not exists idx_sinistro_log_id_sinistro on sinistro_log(id_sinistro);
 `;
 
 /** Colunas adicionadas depois que `apolice_item`/etc. já podem existir em bancos instalados. */
