@@ -1,6 +1,8 @@
 import { File, UploadType } from 'expo-file-system';
 
 import {
+  buscarArquivoParaTransferencia,
+  buscarInstanciaParaTransferencia,
   listarArquivosParaTransferencia,
   listarAtasParaTransferencia,
   listarInstanciasParaTransferencia,
@@ -19,8 +21,18 @@ interface EnvioDocumento {
   uri: string;
   idDocumento: number;
   chaveLocal: string;
-  nomeExibicao: string;
+  nomeBase: string;
   complemento: string;
+}
+
+/**
+ * Nome "base" mandado pro servidor (equivalente a `$_POST['filepdf']` do legado
+ * transfere_pdf-2.0.php) — o servidor é quem monta o nome final (número de sinistro + numeração
+ * de anexo, ou a versão simplificada quando o documento não exige anexo), então aqui só manda um
+ * texto simples que identifique o documento.
+ */
+function nomeBaseDocumento(nmDocumento: string, complemento: string): string {
+  return `${complemento ? `${nmDocumento} - ${complemento}` : nmDocumento}.pdf`;
 }
 
 async function enviarPdf(
@@ -41,7 +53,7 @@ async function enviarPdf(
         id_sinistro: String(idSinistro),
         id_documento: String(envio.idDocumento),
         chave_local: envio.chaveLocal,
-        nome_exibicao: envio.nomeExibicao,
+        nome_base: envio.nomeBase,
         complemento: envio.complemento,
       },
     });
@@ -81,7 +93,7 @@ async function enviarArquivosProntos(
         uri: arquivo.nome_arquivo,
         idDocumento: arquivo.id_documento,
         chaveLocal: `PDF${arquivo.id_docpdf}`,
-        nomeExibicao: arquivo.complemento ? `${arquivo.nm_documento} - ${arquivo.complemento}` : arquivo.nm_documento,
+        nomeBase: nomeBaseDocumento(arquivo.nm_documento, arquivo.complemento),
         complemento: arquivo.complemento,
       },
       usuario,
@@ -139,7 +151,7 @@ export async function transferirDocumentos(idSinistro: number): Promise<Resultad
           uri: pdfGerado,
           idDocumento: instancia.id_documento,
           chaveLocal: instancia.grupopag,
-          nomeExibicao: instancia.complemento ? `${instancia.nm_documento} - ${instancia.complemento}` : instancia.nm_documento,
+          nomeBase: nomeBaseDocumento(instancia.nm_documento, instancia.complemento),
           complemento: instancia.complemento,
         },
         credenciais.usuario,
@@ -177,6 +189,88 @@ export async function transferirDocumentos(idSinistro: number): Promise<Resultad
     sucesso: false,
     mensagem: `${enviados} enviado(s), ${falhas.length} com erro:\n${falhas.join('\n')}`,
   };
+}
+
+/** Transmite individualmente um único arquivo anexado (sinidocpdf) — botão "Enviar" na tela de Documentos. */
+export async function transferirArquivoUnico(idSinistro: number, idDocpdf: number): Promise<ResultadoTransferencia> {
+  const credenciais = await lerCredenciais();
+  if (!credenciais) {
+    return { sucesso: false, mensagem: 'Nenhuma sessão salva. Faça login novamente.' };
+  }
+
+  const arquivo = await buscarArquivoParaTransferencia(idDocpdf);
+  if (!arquivo) {
+    return { sucesso: false, mensagem: 'Arquivo não encontrado.' };
+  }
+
+  const resultado = await enviarPdf(
+    idSinistro,
+    {
+      uri: arquivo.nome_arquivo,
+      idDocumento: arquivo.id_documento,
+      chaveLocal: `PDF${arquivo.id_docpdf}`,
+      nomeBase: nomeBaseDocumento(arquivo.nm_documento, arquivo.complemento),
+      complemento: arquivo.complemento,
+    },
+    credenciais.usuario,
+    credenciais.senhaEnvio,
+  );
+
+  if (resultado.sucesso) {
+    await marcarArquivoEnviado(arquivo.id_docpdf);
+    return { sucesso: true, mensagem: 'Documento enviado com sucesso.' };
+  }
+  return { sucesso: false, mensagem: resultado.mensagem };
+}
+
+/** Transmite individualmente uma única instância fotografada (grupopag) — botão "Enviar" na tela de Documentos. */
+export async function transferirInstanciaUnica(
+  idSinistro: number,
+  idDocumento: number,
+  grupopag: string,
+): Promise<ResultadoTransferencia> {
+  const credenciais = await lerCredenciais();
+  if (!credenciais) {
+    return { sucesso: false, mensagem: 'Nenhuma sessão salva. Faça login novamente.' };
+  }
+
+  const instancia = await buscarInstanciaParaTransferencia(idSinistro, idDocumento, grupopag);
+  if (!instancia) {
+    return { sucesso: false, mensagem: 'Documento não encontrado.' };
+  }
+
+  let pdfGerado: string | null = null;
+  try {
+    pdfGerado = await gerarPdfDePaginas(instancia.paginas);
+    const resultado = await enviarPdf(
+      idSinistro,
+      {
+        uri: pdfGerado,
+        idDocumento: instancia.id_documento,
+        chaveLocal: instancia.grupopag,
+        nomeBase: nomeBaseDocumento(instancia.nm_documento, instancia.complemento),
+        complemento: instancia.complemento,
+      },
+      credenciais.usuario,
+      credenciais.senhaEnvio,
+    );
+    if (resultado.sucesso) {
+      await marcarInstanciaEnviada(idSinistro, instancia.id_documento, instancia.grupopag);
+      return { sucesso: true, mensagem: 'Documento enviado com sucesso.' };
+    }
+    return { sucesso: false, mensagem: resultado.mensagem };
+  } catch (erro) {
+    return { sucesso: false, mensagem: erro instanceof Error ? erro.message : 'falha ao gerar PDF' };
+  } finally {
+    if (pdfGerado) {
+      try {
+        const temporario = new File(pdfGerado);
+        if (temporario.exists) temporario.delete();
+      } catch {
+        // best-effort: limpeza do PDF gerado, não é crítico se falhar
+      }
+    }
+  }
 }
 
 /**

@@ -282,6 +282,9 @@ create table if not exists sinistro_log(
   acao varchar(60));
 
 create index if not exists idx_sinistro_log_id_sinistro on sinistro_log(id_sinistro);
+
+/** Ids de mensagem_broadcast (servidor) já notificadas localmente — evita repetir a notificação a cada checagem periódica enquanto a mensagem continuar sem ser lida. */
+create table if not exists mensagem_notificada(id_mensagem integer primary key not null);
 `;
 
 /** Colunas adicionadas depois que `apolice_item`/etc. já podem existir em bancos instalados. */

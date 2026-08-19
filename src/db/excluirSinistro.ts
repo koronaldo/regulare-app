@@ -48,3 +48,21 @@ export async function excluirSinistroCompleto(idSinistro: number): Promise<void>
   const pasta = new Directory(Paths.document, 'RegulareFiles', String(idSinistro));
   if (pasta.exists) pasta.delete();
 }
+
+/**
+ * Porta de "Limpar Dispositivo" (menu do dashboard): apaga TODOS os processos e os respectivos
+ * logs salvos no aparelho, mas preserva o cadastro do usuário logado (tabelas `usuarioff` e
+ * `config`) — a sessão continua ativa depois de limpar. Ação local — não afeta o servidor.
+ */
+export async function limparTodosOsProcessos(): Promise<void> {
+  const db = await getDb();
+
+  await db.withTransactionAsync(async () => {
+    for (const tabela of [...TABELAS_POR_ID_SINISTRO, 'sinistro_log']) {
+      await db.runAsync(`delete from ${tabela}`);
+    }
+  });
+
+  const pasta = new Directory(Paths.document, 'RegulareFiles');
+  if (pasta.exists) pasta.delete();
+}

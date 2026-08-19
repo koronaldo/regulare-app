@@ -281,11 +281,19 @@ export default function CoberturasScreen() {
   }
 
   function voltar() {
+    if (form) {
+      mostrarAlerta('Cobertura em edição', 'Salve ou cancele a cobertura em edição antes de continuar.');
+      return;
+    }
     router.back();
   }
 
   function proximo() {
     // Porta de ProximaTela (cadcobertura_def.js): Coberturas -> Beneficiários.
+    if (form) {
+      mostrarAlerta('Cobertura em edição', 'Salve ou cancele a cobertura em edição antes de continuar.');
+      return;
+    }
     if (coberturas.length === 0) {
       mostrarAlerta('Atenção', 'Confira os dados da cobertura antes de ir pra próxima tela.');
       return;

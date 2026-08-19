@@ -53,6 +53,8 @@ export default function TransferenciaScreen() {
   const [informacoesOk, setInformacoesOk] = useState(true);
   const [selecionados, setSelecionados] = useState<Set<number>>(new Set());
   const [transferindo, setTransferindo] = useState(false);
+  const [itemAtual, setItemAtual] = useState<number | null>(null);
+  const [progresso, setProgresso] = useState({ feito: 0, total: 0 });
 
   useFocusEffect(
     useCallback(() => {
@@ -102,14 +104,15 @@ export default function TransferenciaScreen() {
       return;
     }
 
-    setTransferindo(true);
-    try {
-      const sucessos: string[] = [];
-      const falhas: string[] = [];
-      const naoImplementados: string[] = [];
+    const selecionadosNaOrdem = itens.filter((item) => selecionados.has(item.id_tipotrans));
 
-      for (const item of itens) {
-        if (!selecionados.has(item.id_tipotrans)) continue;
+    setTransferindo(true);
+    setProgresso({ feito: 0, total: selecionadosNaOrdem.length });
+    try {
+      let sucessos = 0;
+
+      for (const item of selecionadosNaOrdem) {
+        setItemAtual(item.id_tipotrans);
 
         let resultado: { sucesso: boolean; mensagem: string } | null = null;
 
@@ -143,38 +146,35 @@ export default function TransferenciaScreen() {
           resultado = await transferirRecibos(idSinistro);
         }
 
-        if (!resultado) {
-          naoImplementados.push(item.nm_tipotrans);
-          continue;
+        if (resultado) {
+          await atualizarStatusTransferencia(idSinistro, item.id_tipotrans, resultado.sucesso ? 'S' : 'E');
+          if (resultado.sucesso) sucessos++;
+
+          // Atualiza o status desse item na hora (não espera o fim de todos), pra dar o efeito de progresso.
+          setItens((atual) =>
+            atual.map((i) =>
+              i.id_tipotrans === item.id_tipotrans ? { ...i, status_trans: resultado!.sucesso ? 'S' : 'E' } : i,
+            ),
+          );
         }
 
-        await atualizarStatusTransferencia(idSinistro, item.id_tipotrans, resultado.sucesso ? 'S' : 'E');
-        if (resultado.sucesso) sucessos.push(item.nm_tipotrans);
-        else falhas.push(`${item.nm_tipotrans}: ${resultado.mensagem}`);
+        setProgresso((atual) => ({ ...atual, feito: atual.feito + 1 }));
       }
+
+      setItemAtual(null);
 
       const lista = await listarStatusTransferencia(idSinistro);
       setItens(lista);
       setSelecionados(new Set(lista.filter((item) => item.status_trans !== 'S').map((item) => item.id_tipotrans)));
 
-      if (sucessos.length > 0) {
+      if (sucessos > 0) {
         await registrarLog(idSinistro, 'Transferido para servidor');
       }
 
-      if (falhas.length > 0) {
-        mostrarAlerta('Erro ao transferir', falhas.join('\n\n'));
-      } else if (sucessos.length > 0 && naoImplementados.length === 0) {
-        mostrarAlerta('Transferência concluída', `${sucessos.join(', ')} enviado(s) com sucesso.`);
-      } else if (sucessos.length > 0) {
-        mostrarAlerta(
-          'Transferência parcial',
-          `${sucessos.join(', ')} enviado(s) com sucesso. Ainda não implementado: ${naoImplementados.join(', ')}.`,
-        );
-      } else {
-        mostrarAlerta('Ainda não implementado', `Em uma próxima etapa: ${naoImplementados.join(', ')}.`);
-      }
+      mostrarAlerta('Transferência finalizada', 'A transferência foi finalizada.');
     } finally {
       setTransferindo(false);
+      setItemAtual(null);
     }
   }
 
@@ -218,6 +218,7 @@ export default function TransferenciaScreen() {
 
         {itens.map((item) => {
           const selecionado = selecionados.has(item.id_tipotrans);
+          const enviandoEste = itemAtual === item.id_tipotrans;
           const status = statusVisual(item);
           const obrigatorio = item.id_tipotrans === ID_TIPOTRANS_INFORMACOES && !informacoesOk;
           return (
@@ -226,14 +227,21 @@ export default function TransferenciaScreen() {
                 value={selecionado}
                 onValueChange={() => alternarSelecao(item.id_tipotrans)}
                 trackColor={{ true: '#1c3d5a' }}
+                disabled={transferindo}
               />
               <View style={styles.linhaTexto}>
                 <Text style={styles.linhaLabel}>{item.nm_tipotrans}</Text>
                 {obrigatorio && <Text style={styles.linhaObrigatorio}>Obrigatório</Text>}
               </View>
               <View style={styles.linhaStatus}>
-                <Ionicons name={status.icone} size={18} color={status.cor} />
-                <Text style={[styles.linhaStatusTexto, { color: status.cor }]}>{status.texto}</Text>
+                {enviandoEste ? (
+                  <ActivityIndicator size="small" color="#1c3d5a" />
+                ) : (
+                  <Ionicons name={status.icone} size={18} color={status.cor} />
+                )}
+                <Text style={[styles.linhaStatusTexto, { color: enviandoEste ? '#1c3d5a' : status.cor }]}>
+                  {enviandoEste ? 'Enviando' : status.texto}
+                </Text>
               </View>
             </View>
           );
@@ -241,6 +249,21 @@ export default function TransferenciaScreen() {
       </ScrollView>
 
       <View style={[styles.rodape, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+        {transferindo && (
+          <View style={styles.progressoContainer}>
+            <Text style={styles.progressoTexto}>
+              Transferindo {progresso.feito} de {progresso.total}…
+            </Text>
+            <View style={styles.progressoTrilha}>
+              <View
+                style={[
+                  styles.progressoBarra,
+                  { width: `${progresso.total > 0 ? (progresso.feito / progresso.total) * 100 : 0}%` },
+                ]}
+              />
+            </View>
+          </View>
+        )}
         <Pressable
           style={[styles.botaoTransferir, transferindo && styles.botaoTransferirDesabilitado]}
           onPress={transferir}
@@ -347,6 +370,27 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderTopWidth: 1,
     borderTopColor: '#eef2f5',
+  },
+  progressoContainer: {
+    marginBottom: 12,
+  },
+  progressoTexto: {
+    color: '#1c3d5a',
+    fontSize: 13,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginBottom: 6,
+  },
+  progressoTrilha: {
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#eef2f5',
+    overflow: 'hidden',
+  },
+  progressoBarra: {
+    height: '100%',
+    borderRadius: 4,
+    backgroundColor: '#1c3d5a',
   },
   botaoTransferir: {
     flexDirection: 'row',

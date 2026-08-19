@@ -1,7 +1,7 @@
 import { File, UploadType } from 'expo-file-system';
 import { Video } from 'react-native-compressor';
 
-import { listarVideosParaTransferencia, marcarVideoEnviado, type VideoResumo } from '../db/videos';
+import { buscarVideoParaTransferencia, listarVideosParaTransferencia, marcarVideoEnviado, type VideoResumo } from '../db/videos';
 import { lerCredenciais } from './credenciais';
 import { requireApiUrl, type ResultadoTransferencia } from './apiTransferencia';
 
@@ -119,4 +119,24 @@ export async function transferirVideos(idSinistro: number): Promise<ResultadoTra
     sucesso: false,
     mensagem: `${enviados} enviado(s), ${falhas.length} com erro:\n${falhas.join('\n')}`,
   };
+}
+
+/** Transmite individualmente um único vídeo — botão "Enviar" na tela de Vídeos e Áudios. */
+export async function transferirVideoUnico(idSinistro: number, idVideo: number): Promise<ResultadoTransferencia> {
+  const credenciais = await lerCredenciais();
+  if (!credenciais) {
+    return { sucesso: false, mensagem: 'Nenhuma sessão salva. Faça login novamente.' };
+  }
+
+  const video = await buscarVideoParaTransferencia(idVideo);
+  if (!video) {
+    return { sucesso: false, mensagem: 'Vídeo não encontrado.' };
+  }
+
+  const resultado = await enviarVideo(idSinistro, video, credenciais.usuario, credenciais.senhaEnvio);
+  if (resultado.sucesso) {
+    await marcarVideoEnviado(video.id_video);
+    return { sucesso: true, mensagem: 'Vídeo enviado com sucesso.' };
+  }
+  return { sucesso: false, mensagem: resultado.mensagem };
 }

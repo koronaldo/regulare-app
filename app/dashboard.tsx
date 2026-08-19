@@ -22,7 +22,7 @@ import { cancelarVerificacaoPeriodica } from '../src/services/backgroundSync';
 import { limparCredenciais } from '../src/services/credenciais';
 import { sincronizarComCredenciaisSalvas } from '../src/services/auth';
 import { contarSinistros, listarSinistros, type SinistroResumo, type SituacaoSinistro } from '../src/db/sinistros';
-import { excluirSinistroCompleto } from '../src/db/excluirSinistro';
+import { excluirSinistroCompleto, limparTodosOsProcessos } from '../src/db/excluirSinistro';
 
 const ABAS: { valor: SituacaoSinistro; label: string; icone: keyof typeof Ionicons.glyphMap }[] = [
   { valor: 'P', label: 'Pendentes', icone: 'time-outline' },
@@ -145,7 +145,28 @@ export default function DashboardScreen() {
 
   function limparDispositivo() {
     setMenuVisivel(false);
-    Alert.alert('Limpar Dispositivo', 'Funcionalidade ainda será implementada em uma próxima etapa.');
+    Alert.alert(
+      'Limpar Dispositivo',
+      'Isso vai apagar TODOS os processos, fotos, documentos e logs salvos neste aparelho (o cadastro do usuário logado é preservado). Essa ação não pode ser desfeita. Deseja realmente continuar?',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Limpar',
+          style: 'destructive',
+          onPress: async () => {
+            await limparTodosOsProcessos();
+            setSinistros([]);
+            setTotal(0);
+            Alert.alert('Concluído', 'Todos os processos e logs foram removidos deste aparelho.');
+          },
+        },
+      ],
+    );
+  }
+
+  function abrirMensagens() {
+    setMenuVisivel(false);
+    router.push('/mensagens');
   }
 
   function inserirRoteiros() {
@@ -160,6 +181,7 @@ export default function DashboardScreen() {
 
   const OPCOES_MENU: { chave: string; label: string; icone: keyof typeof Ionicons.glyphMap; onPress: () => void }[] = [
     { chave: 'novos', label: 'Novos Processos', icone: 'cloud-download-outline', onPress: novosProcessos },
+    { chave: 'mensagens', label: 'Mensagens', icone: 'mail-outline', onPress: abrirMensagens },
     { chave: 'logs', label: 'Consultar Logs', icone: 'document-text-outline', onPress: consultarLogs },
     { chave: 'roteiros', label: 'Inserir Roteiros', icone: 'map-outline', onPress: inserirRoteiros },
     { chave: 'limpar', label: 'Limpar Dispositivo', icone: 'trash-outline', onPress: limparDispositivo },

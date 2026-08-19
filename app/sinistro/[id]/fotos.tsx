@@ -37,6 +37,7 @@ import {
   type LegendaFoto,
 } from '../../../src/db/fotos';
 import { buscarSinistroPorId } from '../../../src/db/sinistros';
+import { transferirFotoUnica } from '../../../src/services/transferenciaFotos';
 import { mostrarAlerta } from '../../../src/utils/alerta';
 
 const DIMENSAO_MAXIMA = 1600;
@@ -101,6 +102,7 @@ export default function FotosScreen() {
   const [processando, setProcessando] = useState(false);
   const [complemento, setComplemento] = useState<EstadoComplemento | null>(null);
   const [renomeando, setRenomeando] = useState<string | null>(null);
+  const [enviandoFoto, setEnviandoFoto] = useState(false);
 
   const sortable = useSortableList({
     data: fotos,
@@ -257,6 +259,28 @@ export default function FotosScreen() {
       mostrarAlerta('Erro', 'Erro ao girar a foto.');
     } finally {
       setProcessando(false);
+    }
+  }
+
+  function enviarFotoIndividual(foto: FotoResumo) {
+    if (foto.situacao === 'E') {
+      mostrarAlerta('Foto já enviada', 'Esta foto já foi enviada ao servidor antes. Deseja enviar novamente?', [
+        { text: 'Cancelar' },
+        { text: 'Enviar novamente', onPress: () => executarEnvioFoto(foto) },
+      ]);
+      return;
+    }
+    executarEnvioFoto(foto);
+  }
+
+  async function executarEnvioFoto(foto: FotoResumo) {
+    setEnviandoFoto(true);
+    try {
+      const resultado = await transferirFotoUnica(idSinistro, foto.id_foto);
+      mostrarAlerta(resultado.sucesso ? 'Sucesso' : 'Erro ao enviar', resultado.mensagem);
+      if (resultado.sucesso) await recarregarFotos();
+    } finally {
+      setEnviandoFoto(false);
     }
   }
 
@@ -586,6 +610,17 @@ export default function FotosScreen() {
                     disabled={processando}
                   >
                     <Ionicons name="refresh-outline" size={28} color="#1c3d5a" />
+                  </Pressable>
+                  <Pressable
+                    style={styles.botaoIcone}
+                    onPress={() => enviarFotoIndividual(fotoAtual)}
+                    disabled={enviandoFoto}
+                  >
+                    {enviandoFoto ? (
+                      <ActivityIndicator size="small" color="#1c3d5a" />
+                    ) : (
+                      <Ionicons name="cloud-upload-outline" size={26} color="#1c3d5a" />
+                    )}
                   </Pressable>
                   <Pressable
                     style={styles.botaoIcone}

@@ -26,11 +26,13 @@ import {
   buscarSinistroPorId,
   listarCausas,
   listarCidadesPorEstado,
+  listarCodigosTipoApolice,
   listarEstados,
   listarRelacoesSeg,
   listarTiposApolice,
   salvarCadastroSinistro,
   type CorretoraInfo,
+  type TipoApoliceCodigo,
 } from '../../../src/db/sinistros';
 import { mostrarAlerta } from '../../../src/utils/alerta';
 import { cnpjValido, cpfValido, formatarCNPJ, formatarCPF } from '../../../src/utils/documentos';
@@ -155,6 +157,7 @@ export default function CadastroSinistroScreen() {
   const [causas, setCausas] = useState<OpcaoSelecao[]>([]);
   const [relacoes, setRelacoes] = useState<OpcaoSelecao[]>([]);
   const [tiposApolice, setTiposApolice] = useState<OpcaoSelecao[]>([]);
+  const [codigosTipoApolice, setCodigosTipoApolice] = useState<TipoApoliceCodigo[]>([]);
   const [corretora, setCorretora] = useState<CorretoraInfo | null>(null);
   const [cabecalho, setCabecalho] = useState({ segurado: '', sinistro: '' });
   const [erroCampo, setErroCampo] = useState<{ campo: keyof FormState; mensagem: string } | null>(null);
@@ -194,19 +197,22 @@ export default function CadastroSinistroScreen() {
     async function carregar() {
       setCarregando(true);
       try {
-        const [sinistro, listaEstados, listaCausas, listaRelacoes, listaTiposApolice] = await Promise.all([
-          buscarSinistroPorId(idSinistro),
-          listarEstados(),
-          listarCausas(),
-          listarRelacoesSeg(),
-          listarTiposApolice(),
-        ]);
+        const [sinistro, listaEstados, listaCausas, listaRelacoes, listaTiposApolice, listaCodigosTipoApolice] =
+          await Promise.all([
+            buscarSinistroPorId(idSinistro),
+            listarEstados(),
+            listarCausas(),
+            listarRelacoesSeg(),
+            listarTiposApolice(),
+            listarCodigosTipoApolice(),
+          ]);
         if (cancelado || !sinistro) return;
 
         setEstados(listaEstados);
         setCausas(listaCausas);
         setRelacoes(listaRelacoes);
         setTiposApolice(listaTiposApolice);
+        setCodigosTipoApolice(listaCodigosTipoApolice);
         setCabecalho({ segurado: sinistro.nm_segurado ?? '', sinistro: sinistro.nro_sinistro ?? '' });
 
         if (sinistro.id_estado) {
@@ -285,6 +291,16 @@ export default function CadastroSinistroScreen() {
     atualizar('id_cidade', '');
     const lista = await listarCidadesPorEstado(novoEstado);
     setCidades(lista);
+  }
+
+  /** Local Determinado/Território Nacional só fazem sentido pra apólice de Máquina — troca pra outro tipo desmarca os dois. */
+  function mudarTipoApolice(valor: string) {
+    atualizar('id_tipoapolice', valor);
+    const codigo = codigosTipoApolice.find((t) => String(t.id_tipoapolice) === valor)?.tipo_apolice;
+    if (codigo !== 'MAQ') {
+      atualizar('local_determinado', false);
+      atualizar('territorio_nacional', false);
+    }
   }
 
   function mudarLocalDeterminado(valor: boolean) {
@@ -610,7 +626,7 @@ export default function CadastroSinistroScreen() {
             label="Tipo de apólice"
             valor={form.id_tipoapolice}
             opcoes={tiposApolice}
-            onChange={(v) => atualizar('id_tipoapolice', v)}
+            onChange={mudarTipoApolice}
           />
           <Interruptor label="Local Determinado" valor={form.local_determinado} onChange={mudarLocalDeterminado} />
           <Interruptor label="Território Nacional" valor={form.territorio_nacional} onChange={mudarTerritorioNacional} />

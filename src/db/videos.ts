@@ -128,6 +128,26 @@ export async function listarVideosParaTransferencia(idSinistro: number): Promise
   }));
 }
 
+/** Busca um único vídeo (por id_video), pra transmitir individualmente. */
+export async function buscarVideoParaTransferencia(idVideo: number): Promise<VideoResumo | null> {
+  const db = await getDb();
+  const l = await db.getFirstAsync<{
+    id_video: number;
+    arquivo: string | null;
+    legenda: string | null;
+    situacao: string | null;
+    ordem: number | string | null;
+  }>('select id_video, arquivo, legenda, situacao, ordem from sinivideoapp where id_video = ?', [idVideo]);
+  if (!l) return null;
+  return {
+    id_video: l.id_video,
+    arquivo: l.arquivo ?? '',
+    legenda: l.legenda ?? '',
+    situacao: l.situacao ?? 'P',
+    ordem: l.ordem != null ? Number(l.ordem) : 0,
+  };
+}
+
 /** Porta de onUploadSuccessVideo (envia_fotos_servidor.js): marca o vídeo como transferido com sucesso. */
 export async function marcarVideoEnviado(idVideo: number): Promise<void> {
   const db = await getDb();

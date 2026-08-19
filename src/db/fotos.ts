@@ -150,6 +150,28 @@ export async function listarFotosParaTransferencia(idSinistro: number): Promise<
   }));
 }
 
+/** Busca uma única foto (por id_foto), pra transmitir individualmente. */
+export async function buscarFotoParaTransferencia(idFoto: number): Promise<FotoResumo | null> {
+  const db = await getDb();
+  const l = await db.getFirstAsync<{
+    id_foto: number;
+    arquivo: string | null;
+    legenda: string | null;
+    situacao: string | null;
+    posicao: string | null;
+    ordem: number | string | null;
+  }>('select id_foto, arquivo, legenda, situacao, posicao, ordem from sinifotoapp where id_foto = ?', [idFoto]);
+  if (!l) return null;
+  return {
+    id_foto: l.id_foto,
+    arquivo: l.arquivo ?? '',
+    legenda: l.legenda ?? '',
+    situacao: l.situacao ?? 'P',
+    posicao: l.posicao ?? 'R',
+    ordem: l.ordem != null ? Number(l.ordem) : 0,
+  };
+}
+
 /** Porta de onUploadSuccess (envia_fotos_servidor.js): marca a foto como transferida com sucesso. */
 export async function marcarFotoEnviada(idFoto: number): Promise<void> {
   const db = await getDb();

@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { Stack } from 'expo-router';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
-import { configurarNotificacoes, registrarVerificacaoPeriodica } from '../src/services/backgroundSync';
+import { configurarNotificacoes, configurarRespostaNotificacoes, registrarVerificacaoPeriodica } from '../src/services/backgroundSync';
 import { lerCredenciais } from '../src/services/credenciais';
 import { inicializarBancoLocal } from '../src/db/schema';
 
@@ -24,6 +24,8 @@ export default function RootLayout() {
       .catch((error) => {
         console.log('Erro reregistrando verificação periódica:', error);
       });
+
+    return configurarRespostaNotificacoes();
   }, []);
 
   return (

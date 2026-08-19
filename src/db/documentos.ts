@@ -4,11 +4,13 @@ import { registrarLog } from './logs';
 export interface InstanciaDocumento {
   grupopag: string;
   totalPaginas: number;
+  enviado: boolean;
 }
 
 export interface ArquivoDocumento {
   id_docpdf: number;
   nome_arquivo: string;
+  enviado: boolean;
 }
 
 export interface DocumentoResumo {
@@ -106,8 +108,17 @@ export async function listarDocumentos(
   if (idsDocumentos.length > 0) {
     const placeholders = idsDocumentos.map(() => '?').join(',');
 
-    const linhasInstancias = await db.getAllAsync<{ id_documento: number; grupopag: string; total: number }>(
-      `select id_documento, grupopag, count(*) as total from sinidocpag
+    // "todas_enviadas": 1 só quando TODAS as páginas da instância já foram enviadas ('E') —
+    // min() do flag 0/1 por página dá 1 apenas se nenhuma página estiver pendente.
+    const linhasInstancias = await db.getAllAsync<{
+      id_documento: number;
+      grupopag: string;
+      total: number;
+      todas_enviadas: number;
+    }>(
+      `select id_documento, grupopag, count(*) as total,
+         min(case when enviado = 'E' then 1 else 0 end) as todas_enviadas
+       from sinidocpag
        where id_sinistro = ? and id_documento in (${placeholders})
        group by id_documento, grupopag
        order by grupopag`,
@@ -115,19 +126,24 @@ export async function listarDocumentos(
     );
     for (const li of linhasInstancias) {
       const lista = instanciasPorDoc.get(li.id_documento) ?? [];
-      lista.push({ grupopag: li.grupopag, totalPaginas: Number(li.total) });
+      lista.push({ grupopag: li.grupopag, totalPaginas: Number(li.total), enviado: !!li.todas_enviadas });
       instanciasPorDoc.set(li.id_documento, lista);
     }
 
-    const linhasArquivos = await db.getAllAsync<{ id_docpdf: number; id_documento: number; nome_arquivo: string | null }>(
-      `select id_docpdf, id_documento, nome_arquivo from sinidocpdf
+    const linhasArquivos = await db.getAllAsync<{
+      id_docpdf: number;
+      id_documento: number;
+      nome_arquivo: string | null;
+      enviado: number | boolean | null;
+    }>(
+      `select id_docpdf, id_documento, nome_arquivo, enviado from sinidocpdf
        where id_sinistro = ? and id_documento in (${placeholders})
        order by id_docpdf`,
       [idSinistro, ...idsDocumentos],
     );
     for (const la of linhasArquivos) {
       const lista = arquivosPorDoc.get(la.id_documento) ?? [];
-      lista.push({ id_docpdf: la.id_docpdf, nome_arquivo: la.nome_arquivo ?? '' });
+      lista.push({ id_docpdf: la.id_docpdf, nome_arquivo: la.nome_arquivo ?? '', enviado: !!la.enviado });
       arquivosPorDoc.set(la.id_documento, lista);
     }
   }
@@ -300,11 +316,11 @@ export async function definirFormatoPagina(idPagina: number, formato: '1' | '2' 
 /** Arquivos anexados via upload (não fotografados) — sinidocpdf. */
 export async function listarArquivos(idSinistro: number, idDocumento: number): Promise<ArquivoDocumento[]> {
   const db = await getDb();
-  const linhas = await db.getAllAsync<{ id_docpdf: number; nome_arquivo: string | null }>(
-    'select id_docpdf, nome_arquivo from sinidocpdf where id_sinistro = ? and id_documento = ? order by id_docpdf',
+  const linhas = await db.getAllAsync<{ id_docpdf: number; nome_arquivo: string | null; enviado: number | boolean | null }>(
+    'select id_docpdf, nome_arquivo, enviado from sinidocpdf where id_sinistro = ? and id_documento = ? order by id_docpdf',
     [idSinistro, idDocumento],
   );
-  return linhas.map((l) => ({ id_docpdf: l.id_docpdf, nome_arquivo: l.nome_arquivo ?? '' }));
+  return linhas.map((l) => ({ id_docpdf: l.id_docpdf, nome_arquivo: l.nome_arquivo ?? '', enviado: !!l.enviado }));
 }
 
 export async function inserirArquivo(idSinistro: number, idDocumento: number, arquivo: string): Promise<void> {
@@ -389,6 +405,37 @@ export async function listarInstanciasParaTransferencia(idSinistro: number): Pro
   return Array.from(mapa.values());
 }
 
+/** Busca uma única instância fotografada (grupopag), pra transmitir esse documento individualmente. */
+export async function buscarInstanciaParaTransferencia(
+  idSinistro: number,
+  idDocumento: number,
+  grupopag: string,
+): Promise<InstanciaParaTransferencia | null> {
+  const db = await getDb();
+  const linhas = await db.getAllAsync<{
+    nm_documento: string;
+    complemento: string | null;
+    nome_arquivo: string | null;
+    formato: string | null;
+  }>(
+    `select dc.nm_documento, sd.complemento, sp.nome_arquivo, sp.formato
+     from sinidocpag sp
+     inner join documentos dc on dc.id_documento = sp.id_documento
+     left join sinidoc sd on sd.id_sinistro = sp.id_sinistro and sd.id_documento = sp.id_documento
+     where sp.id_sinistro = ? and sp.id_documento = ? and sp.grupopag = ?
+     order by sp.ordem`,
+    [idSinistro, idDocumento, grupopag],
+  );
+  if (linhas.length === 0) return null;
+  return {
+    id_documento: idDocumento,
+    nm_documento: linhas[0].nm_documento,
+    grupopag,
+    complemento: linhas[0].complemento ?? '',
+    paginas: linhas.map((l) => ({ arquivo: l.nome_arquivo ?? '', formato: l.formato || '4' })),
+  };
+}
+
 /** Porta de onUploadSuccessPDF (envia_fotos_servidor.js): marca todas as páginas da instância como enviadas. */
 export async function marcarInstanciaEnviada(idSinistro: number, idDocumento: number, grupopag: string): Promise<void> {
   const db = await getDb();
@@ -445,6 +492,33 @@ export async function listarArquivosParaTransferencia(idSinistro: number): Promi
     nome_arquivo: l.nome_arquivo ?? '',
     complemento: l.complemento ?? '',
   }));
+}
+
+/** Busca um único arquivo anexado (sinidocpdf), pra transmitir esse documento individualmente. */
+export async function buscarArquivoParaTransferencia(idDocpdf: number): Promise<ArquivoParaTransferencia | null> {
+  const db = await getDb();
+  const l = await db.getFirstAsync<{
+    id_docpdf: number;
+    id_documento: number;
+    nm_documento: string;
+    nome_arquivo: string | null;
+    complemento: string | null;
+  }>(
+    `select sp.id_docpdf, sp.id_documento, dc.nm_documento, sp.nome_arquivo, sd.complemento
+     from sinidocpdf sp
+     inner join documentos dc on dc.id_documento = sp.id_documento
+     left join sinidoc sd on sd.id_sinistro = sp.id_sinistro and sd.id_documento = sp.id_documento
+     where sp.id_docpdf = ?`,
+    [idDocpdf],
+  );
+  if (!l) return null;
+  return {
+    id_docpdf: l.id_docpdf,
+    id_documento: l.id_documento,
+    nm_documento: l.nm_documento,
+    nome_arquivo: l.nome_arquivo ?? '',
+    complemento: l.complemento ?? '',
+  };
 }
 
 export async function marcarArquivoEnviado(idDocpdf: number): Promise<void> {

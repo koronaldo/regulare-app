@@ -306,11 +306,19 @@ export default function PlanilhaScreen() {
   }
 
   function voltar() {
+    if (form) {
+      mostrarAlerta('Item em edição', 'Salve ou cancele o item em edição antes de continuar.');
+      return;
+    }
     router.back();
   }
 
   function proximo() {
     // Porta de ProximaTela (cadplanilha_def.js): Planilha de Apuração -> Outros Seguros.
+    if (form) {
+      mostrarAlerta('Item em edição', 'Salve ou cancele o item em edição antes de continuar.');
+      return;
+    }
     router.replace({ pathname: '/sinistro/[id]/outros', params: { id: String(idSinistro) } });
   }
 

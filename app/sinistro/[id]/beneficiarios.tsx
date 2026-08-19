@@ -370,11 +370,19 @@ export default function BeneficiariosScreen() {
   }
 
   function voltar() {
+    if (form) {
+      mostrarAlerta('Beneficiário em edição', 'Salve ou cancele o beneficiário em edição antes de continuar.');
+      return;
+    }
     router.back();
   }
 
   function proximo() {
     // Porta de ProximaTela (cadbeneficiario_def.js): Beneficiários -> Planilha de Apuração.
+    if (form) {
+      mostrarAlerta('Beneficiário em edição', 'Salve ou cancele o beneficiário em edição antes de continuar.');
+      return;
+    }
     router.replace({ pathname: '/sinistro/[id]/planilha', params: { id: String(idSinistro) } });
   }
 

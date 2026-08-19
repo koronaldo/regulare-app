@@ -55,6 +55,7 @@ import {
   type RespostaMaquina,
 } from '../../../src/db/informacoes';
 import { buscarSinistroPorId, listarCidadesPorEstado, listarEstados } from '../../../src/db/sinistros';
+import { informacoesCompletas } from '../../../src/db/transferencia';
 import { mostrarAlerta } from '../../../src/utils/alerta';
 import { paraCoordenadasGrau } from '../../../src/utils/coordenadas';
 
@@ -665,13 +666,42 @@ export default function InformacoesScreen() {
   }
 
   function voltar() {
+    if (formBenfeitoria) {
+      mostrarAlerta('Benfeitoria em edição', 'Salve ou cancele a benfeitoria em edição antes de continuar.');
+      return;
+    }
+    if (maquinaSelecionada) {
+      mostrarAlerta('Máquina em edição', 'Salve ou cancele a máquina em edição antes de continuar.');
+      return;
+    }
     router.back();
   }
 
-  function proximo() {
-    // Porta de ProximaTela (cadinformacoes_def.js): Informações -> Coberturas.
+  async function proximo() {
+    // Porta de ProximaTela (cadinformacoes_def.js): Informações -> Coberturas. Antes de avançar,
+    // exige que a benfeitoria em edição (se houver) seja concluída e que o checklist de itens da
+    // apólice já esteja salvo — sem isso o usuário conseguia pular a tela com dados pela metade.
+    if (formBenfeitoria) {
+      mostrarAlerta('Benfeitoria em edição', 'Salve ou cancele a benfeitoria em edição antes de continuar.');
+      return;
+    }
+    if (maquinaSelecionada) {
+      mostrarAlerta('Máquina em edição', 'Salve ou cancele a máquina em edição antes de continuar.');
+      return;
+    }
+
+    const completo = await informacoesCompletas(idSinistro);
+    if (!completo) {
+      mostrarAlerta('Checklist pendente', 'Preencha e salve o checklist de Informações Gerais antes de continuar.');
+      return;
+    }
+
     router.replace({ pathname: '/sinistro/[id]/coberturas', params: { id: String(idSinistro) } });
   }
+
+  // Checklist de conferência (Cidade/UF, Bairro, Logradouro, etc.) vale tanto pra apólice
+  // Predial quanto Máquina — só não se aplica a outros tipos.
+  const checklistDisponivel = tipoApolice === 'PRE' || tipoApolice === 'MAQ';
 
   if (carregando) {
     return (
@@ -716,17 +746,17 @@ export default function InformacoesScreen() {
       <ScrollView ref={scrollRef} contentContainerStyle={styles.conteudo} keyboardShouldPersistTaps="handled">
         <Text style={styles.tituloSecao}>INFORMAÇÕES</Text>
 
-        {tipoApolice !== 'PRE' && (
+        {!checklistDisponivel && (
           <Text style={styles.vazioTexto}>
-            Checklist de informações disponível apenas para apólices do tipo Predial nesta etapa.
+            Checklist de informações disponível apenas para apólices do tipo Predial ou Máquina nesta etapa.
           </Text>
         )}
 
-        {tipoApolice === 'PRE' && itens.length === 0 && (
+        {checklistDisponivel && itens.length === 0 && (
           <Text style={styles.vazioTexto}>Nenhum registro encontrado.</Text>
         )}
 
-        {tipoApolice === 'PRE' &&
+        {checklistDisponivel &&
           itens.map((item) => {
             const valor = valores[item.id_item] ?? VALOR_ITEM_VAZIO;
             const opcoesLista: OpcaoSelecao[] = item.lista_selecao
@@ -843,7 +873,7 @@ export default function InformacoesScreen() {
             );
           })}
 
-        {tipoApolice === 'PRE' && itens.length > 0 && (
+        {checklistDisponivel && itens.length > 0 && (
           <Pressable style={styles.botaoSalvar} onPress={salvarInformacoes} disabled={salvandoApolice}>
             {salvandoApolice ? (
               <ActivityIndicator color="#fff" />

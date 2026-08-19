@@ -1,4 +1,4 @@
-import { notificarSinistrosNovos, registrarVerificacaoPeriodica } from './backgroundSync';
+import { notificarSinistrosNovos, registrarVerificacaoPeriodica, verificarMensagensNovas } from './backgroundSync';
 import { lerCredenciais, prepararSenha, salvarCredenciais } from './credenciais';
 import { importarDadosEstaticos, importarDadosLogin, precisaDadosEstaticos } from '../db/importLogin';
 import { inicializarBancoLocal } from '../db/schema';
@@ -114,6 +114,8 @@ async function autenticarEImportar(usuario: string, senhaEnvio: string): Promise
     if (novos.length > 0) {
       await notificarSinistrosNovos(novos.length);
     }
+
+    await verificarMensagensNovas();
 
     const { tabelas, linhasTotal } = await resumoBancoLocal();
 

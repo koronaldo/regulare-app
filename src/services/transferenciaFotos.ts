@@ -1,7 +1,7 @@
 import { File, UploadType } from 'expo-file-system';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 
-import { listarFotosParaTransferencia, marcarFotoEnviada, type FotoResumo } from '../db/fotos';
+import { buscarFotoParaTransferencia, listarFotosParaTransferencia, marcarFotoEnviada, type FotoResumo } from '../db/fotos';
 import { lerCredenciais } from './credenciais';
 import { requireApiUrl, type ResultadoTransferencia } from './apiTransferencia';
 
@@ -119,4 +119,24 @@ export async function transferirFotos(idSinistro: number): Promise<ResultadoTran
     sucesso: false,
     mensagem: `${enviadas} enviada(s), ${falhas.length} com erro:\n${falhas.join('\n')}`,
   };
+}
+
+/** Transmite individualmente uma única foto — botão "Enviar" na tela de Álbum de Fotos. */
+export async function transferirFotoUnica(idSinistro: number, idFoto: number): Promise<ResultadoTransferencia> {
+  const credenciais = await lerCredenciais();
+  if (!credenciais) {
+    return { sucesso: false, mensagem: 'Nenhuma sessão salva. Faça login novamente.' };
+  }
+
+  const foto = await buscarFotoParaTransferencia(idFoto);
+  if (!foto) {
+    return { sucesso: false, mensagem: 'Foto não encontrada.' };
+  }
+
+  const resultado = await enviarFoto(idSinistro, foto, credenciais.usuario, credenciais.senhaEnvio);
+  if (resultado.sucesso) {
+    await marcarFotoEnviada(foto.id_foto);
+    return { sucesso: true, mensagem: 'Foto enviada com sucesso.' };
+  }
+  return { sucesso: false, mensagem: resultado.mensagem };
 }

@@ -134,6 +134,7 @@ export interface DespesaResumo {
   nro_despesa: string;
   data_desp: string;
   nome_recibo: string;
+  reciboEnviado: boolean;
 }
 
 /** Porta de CarregaDespesa (caddespesa_def_screen.js). */
@@ -157,6 +158,7 @@ export async function listarDespesasLancadas(idSinistro: number): Promise<Despes
     nro_despesa: String(l.nro_despesa ?? ''),
     data_desp: String(l.data_desp ?? ''),
     nome_recibo: String(l.nome_recibo ?? ''),
+    reciboEnviado: !!l.id_despeweb,
   }));
 }
 
@@ -259,6 +261,30 @@ export async function listarRecibosParaTransferencia(idSinistro: number): Promis
     nm_despesa: l.nm_despesa,
     comple: l.comple ?? '',
   }));
+}
+
+/** Busca um único comprovante (por id_sinidesp), pra transmitir individualmente — não filtra por já enviado, pra permitir reenvio. */
+export async function buscarReciboParaTransferencia(idSinidesp: number): Promise<ReciboParaTransferencia | null> {
+  const db = await getDb();
+  const l = await db.getFirstAsync<{
+    id_sinidesp: number;
+    nome_recibo: string | null;
+    nm_despesa: string;
+    comple: string | null;
+  }>(
+    `select sd.id_sinidesp, sd.nome_recibo, de.nm_despesa, sd.comple
+     from sinidesp_iti sd
+     inner join despesa de on de.id_despesa = sd.id_despesa
+     where sd.id_sinidesp = ?`,
+    [idSinidesp],
+  );
+  if (!l) return null;
+  return {
+    id_sinidesp: l.id_sinidesp,
+    nome_recibo: l.nome_recibo ?? '',
+    nm_despesa: l.nm_despesa,
+    comple: l.comple ?? '',
+  };
 }
 
 export async function marcarReciboEnviado(idSinidesp: number): Promise<void> {

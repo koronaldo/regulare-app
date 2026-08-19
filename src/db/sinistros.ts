@@ -262,6 +262,17 @@ export async function listarTiposApolice(): Promise<OpcaoLista[]> {
   return linhas.map((l) => ({ valor: l.id_tipoapolice, label: l.nm_tipoapolice }));
 }
 
+export interface TipoApoliceCodigo {
+  id_tipoapolice: number;
+  tipo_apolice: string;
+}
+
+/** Código (ex.: 'MAQ') de cada tipo de apólice — usado no Cadastro Geral pra saber se o tipo selecionado é Máquina. */
+export async function listarCodigosTipoApolice(): Promise<TipoApoliceCodigo[]> {
+  const db = await getDb();
+  return db.getAllAsync<TipoApoliceCodigo>('select id_tipoapolice, tipo_apolice from tipoapolice');
+}
+
 export interface CorretoraInfo {
   nm_corretora: string | null;
   endereco: string | null;

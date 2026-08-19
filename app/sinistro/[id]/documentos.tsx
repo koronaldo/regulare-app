@@ -37,6 +37,7 @@ import {
   type InstanciaDocumento,
 } from '../../../src/db/documentos';
 import { buscarSinistroPorId } from '../../../src/db/sinistros';
+import { transferirArquivoUnico, transferirInstanciaUnica } from '../../../src/services/transferenciaDocumentos';
 import { mostrarAlerta } from '../../../src/utils/alerta';
 import { reduzImagem } from '../../../src/utils/imagem';
 
@@ -82,6 +83,7 @@ export default function DocumentosScreen() {
   const [filtro, setFiltro] = useState<FiltroDocumento>('solicitados');
   const [pesquisa, setPesquisa] = useState('');
   const [processando, setProcessando] = useState(false);
+  const [enviandoChave, setEnviandoChave] = useState<string | null>(null);
 
   const carregar = useCallback(
     async (filtroAtual: FiltroDocumento, pesquisaAtual: string) => {
@@ -259,6 +261,52 @@ export default function DocumentosScreen() {
     ]);
   }
 
+  function enviarArquivoIndividual(arquivo: ArquivoDocumento) {
+    if (arquivo.enviado) {
+      mostrarAlerta('Documento já enviado', 'Este documento já foi enviado ao servidor antes. Deseja enviar novamente?', [
+        { text: 'Cancelar' },
+        { text: 'Enviar novamente', onPress: () => executarEnvioArquivo(arquivo) },
+      ]);
+      return;
+    }
+    executarEnvioArquivo(arquivo);
+  }
+
+  async function executarEnvioArquivo(arquivo: ArquivoDocumento) {
+    const chave = `arquivo-${arquivo.id_docpdf}`;
+    setEnviandoChave(chave);
+    try {
+      const resultado = await transferirArquivoUnico(idSinistro, arquivo.id_docpdf);
+      mostrarAlerta(resultado.sucesso ? 'Sucesso' : 'Erro ao enviar', resultado.mensagem);
+      if (resultado.sucesso) await carregar(filtro, pesquisa);
+    } finally {
+      setEnviandoChave(null);
+    }
+  }
+
+  function enviarInstanciaIndividual(doc: DocumentoResumo, instancia: InstanciaDocumento) {
+    if (instancia.enviado) {
+      mostrarAlerta('Documento já enviado', 'Este documento já foi enviado ao servidor antes. Deseja enviar novamente?', [
+        { text: 'Cancelar' },
+        { text: 'Enviar novamente', onPress: () => executarEnvioInstancia(doc, instancia) },
+      ]);
+      return;
+    }
+    executarEnvioInstancia(doc, instancia);
+  }
+
+  async function executarEnvioInstancia(doc: DocumentoResumo, instancia: InstanciaDocumento) {
+    const chave = `instancia-${doc.id_documento}-${instancia.grupopag}`;
+    setEnviandoChave(chave);
+    try {
+      const resultado = await transferirInstanciaUnica(idSinistro, doc.id_documento, instancia.grupopag);
+      mostrarAlerta(resultado.sucesso ? 'Sucesso' : 'Erro ao enviar', resultado.mensagem);
+      if (resultado.sucesso) await carregar(filtro, pesquisa);
+    } finally {
+      setEnviandoChave(null);
+    }
+  }
+
   function voltar() {
     router.back();
   }
@@ -344,33 +392,61 @@ export default function DocumentosScreen() {
                   />
                 )}
 
-                {doc.instancias.map((instancia, indice) => (
-                  <Pressable
-                    key={instancia.grupopag}
-                    style={styles.itemInstancia}
-                    onPress={() => abrirInstancia(doc, instancia)}
-                  >
-                    <Ionicons name="document-text" size={18} color="#c0392b" />
-                    <Text style={styles.itemInstanciaTexto}>
-                      Documento {indice + 1} · {instancia.totalPaginas} página(s)
-                    </Text>
-                    <Ionicons name="chevron-forward" size={18} color="#8a97a3" />
-                  </Pressable>
-                ))}
+                {doc.instancias.map((instancia, indice) => {
+                  const chaveEnvio = `instancia-${doc.id_documento}-${instancia.grupopag}`;
+                  const enviandoEsta = enviandoChave === chaveEnvio;
+                  return (
+                    <View key={instancia.grupopag} style={styles.itemInstancia}>
+                      <Pressable style={styles.itemInstanciaToque} onPress={() => abrirInstancia(doc, instancia)}>
+                        <Ionicons name="document-text" size={18} color="#c0392b" />
+                        <Text style={styles.itemInstanciaTexto}>
+                          Documento {indice + 1} · {instancia.totalPaginas} página(s)
+                        </Text>
+                        <Ionicons name="chevron-forward" size={18} color="#8a97a3" />
+                      </Pressable>
+                      <Pressable
+                        hitSlop={10}
+                        disabled={enviandoChave !== null}
+                        onPress={() => enviarInstanciaIndividual(doc, instancia)}
+                      >
+                        {enviandoEsta ? (
+                          <ActivityIndicator size="small" color="#1c3d5a" />
+                        ) : (
+                          <Ionicons name="cloud-upload-outline" size={18} color="#1c3d5a" />
+                        )}
+                      </Pressable>
+                    </View>
+                  );
+                })}
 
-                {doc.arquivos.map((arquivo) => (
-                  <View key={arquivo.id_docpdf} style={styles.itemArquivo}>
-                    <Pressable style={styles.itemArquivoToque} onPress={() => abrirArquivo(arquivo)}>
-                      <Ionicons name="document-outline" size={18} color="#1c3d5a" />
-                      <Text style={styles.itemArquivoTexto} numberOfLines={1}>
-                        {arquivo.nome_arquivo.split('/').pop()}
-                      </Text>
-                    </Pressable>
-                    <Pressable hitSlop={10} onPress={() => confirmarExclusaoArquivo(arquivo)}>
-                      <Ionicons name="trash-outline" size={18} color="#d32f2f" />
-                    </Pressable>
-                  </View>
-                ))}
+                {doc.arquivos.map((arquivo) => {
+                  const chaveEnvio = `arquivo-${arquivo.id_docpdf}`;
+                  const enviandoEste = enviandoChave === chaveEnvio;
+                  return (
+                    <View key={arquivo.id_docpdf} style={styles.itemArquivo}>
+                      <Pressable style={styles.itemArquivoToque} onPress={() => abrirArquivo(arquivo)}>
+                        <Ionicons name="document-outline" size={18} color="#1c3d5a" />
+                        <Text style={styles.itemArquivoTexto} numberOfLines={1}>
+                          {arquivo.nome_arquivo.split('/').pop()}
+                        </Text>
+                      </Pressable>
+                      <Pressable
+                        hitSlop={10}
+                        disabled={enviandoChave !== null}
+                        onPress={() => enviarArquivoIndividual(arquivo)}
+                      >
+                        {enviandoEste ? (
+                          <ActivityIndicator size="small" color="#1c3d5a" />
+                        ) : (
+                          <Ionicons name="cloud-upload-outline" size={18} color="#1c3d5a" />
+                        )}
+                      </Pressable>
+                      <Pressable hitSlop={10} onPress={() => confirmarExclusaoArquivo(arquivo)}>
+                        <Ionicons name="trash-outline" size={18} color="#d32f2f" />
+                      </Pressable>
+                    </View>
+                  );
+                })}
 
                 <View style={styles.linhaAcoes}>
                   <Pressable
@@ -508,6 +584,12 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
     paddingHorizontal: 10,
     marginTop: 8,
+  },
+  itemInstanciaToque: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   itemInstanciaTexto: {
     flex: 1,

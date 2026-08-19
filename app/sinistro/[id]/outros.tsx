@@ -328,11 +328,23 @@ export default function OutrosSegurosScreen() {
   }
 
   function voltar() {
+    if (form) {
+      mostrarAlerta('Outro seguro em edição', 'Salve ou cancele o registro em edição antes de continuar.');
+      return;
+    }
     router.back();
   }
 
-  function proximo() {
-    // Porta de ProximaTela (cadoutroseg_def.js): Outros Seguros -> Relação de Documentos.
+  async function proximo() {
+    // Porta de ProximaTela (cadoutroseg_def.js): Outros Seguros -> Relação de Documentos. Confirma
+    // a resposta atual do "Possui outros seguros?" (libera o botão no menu) mesmo que o usuário
+    // nunca tenha tocado no interruptor — sem isso, quando a resposta certa já era "Não" desde o
+    // início, o botão ficava inativo pra sempre a menos que marcasse e desmarcasse de novo.
+    if (form) {
+      mostrarAlerta('Outro seguro em edição', 'Salve ou cancele o registro em edição antes de continuar.');
+      return;
+    }
+    await definirPossuiOutrosSeguros(idSinistro, possuiOutros);
     router.replace({ pathname: '/sinistro/[id]/documentos', params: { id: String(idSinistro) } });
   }
 

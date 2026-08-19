@@ -37,6 +37,7 @@ import {
   type LimiteDespesa,
 } from '../../../src/db/despesas';
 import { buscarSinistroPorId } from '../../../src/db/sinistros';
+import { transferirReciboUnico } from '../../../src/services/transferenciaRecibos';
 import { mostrarAlerta } from '../../../src/utils/alerta';
 import { reduzImagem } from '../../../src/utils/imagem';
 
@@ -93,6 +94,7 @@ export default function DespesasScreen() {
   const [salvando, setSalvando] = useState(false);
   const [processandoRecibo, setProcessandoRecibo] = useState(false);
   const [fotoAmpliada, setFotoAmpliada] = useState<string | null>(null);
+  const [enviandoRecibo, setEnviandoRecibo] = useState<number | null>(null);
 
   const [deslocamento, setDeslocamento] = useState({ kmInicial: '', kmFinal: '' });
   const [salvandoKm, setSalvandoKm] = useState(false);
@@ -272,6 +274,28 @@ export default function DespesasScreen() {
     }
   }
 
+  function enviarReciboIndividual(d: DespesaResumo) {
+    if (d.reciboEnviado) {
+      mostrarAlerta('Comprovante já enviado', 'Este comprovante já foi enviado ao servidor antes. Deseja enviar novamente?', [
+        { text: 'Cancelar' },
+        { text: 'Enviar novamente', onPress: () => executarEnvioRecibo(d) },
+      ]);
+      return;
+    }
+    executarEnvioRecibo(d);
+  }
+
+  async function executarEnvioRecibo(d: DespesaResumo) {
+    setEnviandoRecibo(d.id_sinidesp);
+    try {
+      const resultado = await transferirReciboUnico(idSinistro, d.id_sinidesp);
+      mostrarAlerta(resultado.sucesso ? 'Sucesso' : 'Erro ao enviar', resultado.mensagem);
+      if (resultado.sucesso) await recarregarDespesas();
+    } finally {
+      setEnviandoRecibo(null);
+    }
+  }
+
   function tocarRecibo(d: DespesaResumo) {
     if (!d.nome_recibo) {
       capturarRecibo(d);
@@ -410,16 +434,31 @@ export default function DespesasScreen() {
                       <Ionicons name="trash-outline" size={20} color="#d32f2f" />
                     </Pressable>
                   </Pressable>
-                  <Pressable style={styles.botaoRecibo} onPress={() => tocarRecibo(d)} disabled={processandoRecibo}>
-                    {d.nome_recibo ? (
-                      <Image source={{ uri: d.nome_recibo }} style={styles.miniaturaRecibo} />
-                    ) : (
-                      <Ionicons name="camera-outline" size={18} color="#1c3d5a" />
+                  <View style={styles.linhaRecibo}>
+                    <Pressable style={[styles.botaoRecibo, styles.botaoReciboFlex]} onPress={() => tocarRecibo(d)} disabled={processandoRecibo}>
+                      {d.nome_recibo ? (
+                        <Image source={{ uri: d.nome_recibo }} style={styles.miniaturaRecibo} />
+                      ) : (
+                        <Ionicons name="camera-outline" size={18} color="#1c3d5a" />
+                      )}
+                      <Text style={styles.botaoReciboTexto}>
+                        {d.nome_recibo ? 'Comprovante anexado' : 'Fotografar comprovante'}
+                      </Text>
+                    </Pressable>
+                    {!!d.nome_recibo && (
+                      <Pressable
+                        style={styles.botaoEnviarRecibo}
+                        onPress={() => enviarReciboIndividual(d)}
+                        disabled={enviandoRecibo !== null}
+                      >
+                        {enviandoRecibo === d.id_sinidesp ? (
+                          <ActivityIndicator size="small" color="#1c3d5a" />
+                        ) : (
+                          <Ionicons name="cloud-upload-outline" size={20} color="#1c3d5a" />
+                        )}
+                      </Pressable>
                     )}
-                    <Text style={styles.botaoReciboTexto}>
-                      {d.nome_recibo ? 'Comprovante anexado' : 'Fotografar comprovante'}
-                    </Text>
-                  </Pressable>
+                  </View>
                 </View>
               ))}
 
@@ -652,6 +691,12 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginTop: 2,
   },
+  linhaRecibo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 8,
+  },
   botaoRecibo: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -660,7 +705,15 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingVertical: 8,
     paddingHorizontal: 10,
-    marginTop: 8,
+  },
+  botaoReciboFlex: {
+    flex: 1,
+    marginTop: 0,
+  },
+  botaoEnviarRecibo: {
+    backgroundColor: '#eef2f5',
+    borderRadius: 8,
+    padding: 9,
   },
   botaoReciboTexto: {
     flex: 1,

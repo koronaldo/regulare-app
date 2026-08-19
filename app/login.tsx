@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import {
   ActivityIndicator,
+  Dimensions,
   Image,
   KeyboardAvoidingView,
   Platform,
@@ -17,6 +18,15 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { autenticarLegado } from '../src/services/auth';
 
 type Mensagem = { tipo: 'sucesso' | 'erro'; texto: string };
+
+/**
+ * `Dimensions.get('screen')` (física do aparelho) em vez de `'window'` (área visível do app) —
+ * no Android, com o teclado aberto, o modo adjustResize encolhe a "window" e o LinearGradient
+ * com flex:1 recalculava as cores sobre essa altura menor, deixando a tela com aspecto
+ * "desbotado"/escurecido enquanto o teclado estava ativo. Fixando o fundo no tamanho da tela
+ * física (que não muda com o teclado) resolve isso.
+ */
+const { width: LARGURA_TELA, height: ALTURA_TELA } = Dimensions.get('screen');
 
 export default function LoginScreen() {
   const [usuario, setUsuario] = useState('');
@@ -59,16 +69,18 @@ export default function LoginScreen() {
   }
 
   return (
-    <LinearGradient
-      colors={['#4aa3ff', '#1c3d5a', '#0f2436']}
-      locations={[0, 0.52, 1]}
-      start={{ x: 0.18, y: 0 }}
-      end={{ x: 0.82, y: 1 }}
-      style={styles.container}
-    >
-      <KeyboardAvoidingView style={styles.form} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-        <StatusBar style="light" />
+    <View style={styles.container}>
+      <StatusBar style="light" />
 
+      <LinearGradient
+        colors={['#4aa3ff', '#1c3d5a', '#0f2436']}
+        locations={[0, 0.52, 1]}
+        start={{ x: 0.18, y: 0 }}
+        end={{ x: 0.82, y: 1 }}
+        style={[styles.fundo, { width: LARGURA_TELA, height: ALTURA_TELA }]}
+      />
+
+      <KeyboardAvoidingView style={styles.form} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <View style={styles.header}>
           <Image source={require('../assets/logo-azul.png')} style={styles.logo} resizeMode="contain" />
           <Text style={styles.title}>Regulare Mobile</Text>
@@ -84,6 +96,8 @@ export default function LoginScreen() {
           value={usuario}
           onChangeText={setUsuario}
           editable={!loading}
+          cursorColor="#ffffff"
+          selectionColor="rgba(255,255,255,0.4)"
         />
         <TextInput
           style={styles.input}
@@ -93,6 +107,8 @@ export default function LoginScreen() {
           value={senha}
           onChangeText={setSenha}
           editable={!loading}
+          cursorColor="#ffffff"
+          selectionColor="rgba(255,255,255,0.4)"
         />
 
         <TouchableOpacity style={styles.button} onPress={handleLogin} disabled={loading}>
@@ -114,13 +130,18 @@ export default function LoginScreen() {
           </Text>
         )}
       </KeyboardAvoidingView>
-    </LinearGradient>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  fundo: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
   },
   form: {
     flex: 1,

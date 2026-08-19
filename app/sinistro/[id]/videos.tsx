@@ -22,6 +22,7 @@ import {
   type VideoResumo,
 } from '../../../src/db/videos';
 import { buscarSinistroPorId } from '../../../src/db/sinistros';
+import { transferirVideoUnico } from '../../../src/services/transferenciaVideos';
 import { mostrarAlerta } from '../../../src/utils/alerta';
 
 function diretorioVideos(idSinistro: number): Directory {
@@ -66,6 +67,7 @@ export default function VideosScreen() {
   const [complemento, setComplemento] = useState<EstadoComplemento | null>(null);
   const [renomeando, setRenomeando] = useState<string | null>(null);
   const [miniaturas, setMiniaturas] = useState<Record<number, string>>({});
+  const [enviandoVideo, setEnviandoVideo] = useState(false);
 
   const videoAtual = videos[indiceAtual] ?? null;
   const player = useVideoPlayer(null);
@@ -209,6 +211,28 @@ export default function VideosScreen() {
       mostrarAlerta('Erro', 'Erro ao salvar o vídeo.');
     } finally {
       setProcessando(false);
+    }
+  }
+
+  function enviarVideoIndividual(video: VideoResumo) {
+    if (video.situacao === 'E') {
+      mostrarAlerta('Vídeo já enviado', 'Este vídeo já foi enviado ao servidor antes. Deseja enviar novamente?', [
+        { text: 'Cancelar' },
+        { text: 'Enviar novamente', onPress: () => executarEnvioVideo(video) },
+      ]);
+      return;
+    }
+    executarEnvioVideo(video);
+  }
+
+  async function executarEnvioVideo(video: VideoResumo) {
+    setEnviandoVideo(true);
+    try {
+      const resultado = await transferirVideoUnico(idSinistro, video.id_video);
+      mostrarAlerta(resultado.sucesso ? 'Sucesso' : 'Erro ao enviar', resultado.mensagem);
+      if (resultado.sucesso) await recarregar();
+    } finally {
+      setEnviandoVideo(false);
     }
   }
 
@@ -399,6 +423,13 @@ export default function VideosScreen() {
               <View style={styles.acoesSlide}>
                 <Pressable style={styles.botaoIcone} onPress={() => navegar(-1)} disabled={indiceAtual <= 0}>
                   <Ionicons name="chevron-back-circle-outline" size={32} color={indiceAtual <= 0 ? '#c2ccd6' : '#1c3d5a'} />
+                </Pressable>
+                <Pressable style={styles.botaoIcone} onPress={() => enviarVideoIndividual(videoAtual)} disabled={enviandoVideo}>
+                  {enviandoVideo ? (
+                    <ActivityIndicator size="small" color="#1c3d5a" />
+                  ) : (
+                    <Ionicons name="cloud-upload-outline" size={26} color="#1c3d5a" />
+                  )}
                 </Pressable>
                 <Pressable style={styles.botaoIcone} onPress={() => confirmarExclusao(videoAtual)}>
                   <Ionicons name="trash-outline" size={26} color="#d32f2f" />
