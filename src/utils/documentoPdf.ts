@@ -1,6 +1,8 @@
 import { File } from 'expo-file-system';
 import * as Print from 'expo-print';
 
+import { compactarImagemParaEnvio, LIMITE_COMPACTACAO_BYTES, tamanhoDoArquivo } from './compactacao';
+
 /** Página A4 em pontos (72dpi) — mesma unidade usada por calcularTamanhoPagina (atasTemplate.ts). */
 const LARGURA_A4_PT = 595;
 const ALTURA_A4_PT = 842;
@@ -22,10 +24,16 @@ export interface PaginaParaPdf {
  * que a imagem renderiza dentro do motor de impressão.
  */
 export async function gerarPdfDePaginas(paginas: PaginaParaPdf[]): Promise<string> {
+  // Cada foto entra no PDF como base64, então o tamanho do PDF é a soma das fotos: compactar
+  // aqui é o que mantém o documento final abaixo do limite de envio. O limite é dividido pelo
+  // número de páginas pra que um documento de várias fotos não estoure a soma.
+  const limitePorPagina = Math.max(Math.floor(LIMITE_COMPACTACAO_BYTES / Math.max(paginas.length, 1)), 300 * 1024);
+
   const divs = await Promise.all(
     paginas.map(async (pagina) => {
       const escala = ESCALA_POR_FORMATO[pagina.formato] ?? 1;
-      const base64 = await new File(pagina.arquivo).base64();
+      const arquivoParaEmbutir = await compactarImagemParaEnvio(pagina.arquivo, limitePorPagina);
+      const base64 = await new File(arquivoParaEmbutir).base64();
       return `<div class="pagina"><img src="data:image/jpeg;base64,${base64}" style="width:${escala * 100}%;height:${escala * 100}%;object-fit:contain;" /></div>`;
     }),
   );
@@ -41,5 +49,12 @@ export async function gerarPdfDePaginas(paginas: PaginaParaPdf[]): Promise<strin
     width: LARGURA_A4_PT,
     height: ALTURA_A4_PT,
   });
+
+  const tamanhoFinal = tamanhoDoArquivo(uri);
+  if (tamanhoFinal > LIMITE_COMPACTACAO_BYTES) {
+    console.warn(
+      `[documentoPdf] PDF de ${paginas.length} página(s) ficou com ${(tamanhoFinal / 1024 / 1024).toFixed(1)}MB, acima do limite de envio.`,
+    );
+  }
   return uri;
 }

@@ -15,8 +15,9 @@ import {
   listarAtasDisponiveis,
   type AtaDisponivel,
 } from '../../../../src/db/atas';
-import { excluirArquivo, listarArquivos } from '../../../../src/db/documentos';
+import { desvincularDocumentoSeVazio, excluirArquivo, listarArquivos } from '../../../../src/db/documentos';
 import { mostrarAlerta } from '../../../../src/utils/alerta';
+import { transferirAtaIndividual } from '../../../../src/services/transferenciaDocumentos';
 import { calcularTamanhoPagina } from '../../../../src/utils/atasTemplate';
 
 export default function AtaDetalheScreen() {
@@ -102,6 +103,17 @@ export default function AtaDetalheScreen() {
     });
   }
 
+  async function enviarAoServidor() {
+    if (!ata?.id_documento) return;
+    setProcessando(true);
+    try {
+      const resultado = await transferirAtaIndividual(idSinistro, ata.id_documento);
+      mostrarAlerta(resultado.sucesso ? 'Enviado' : 'Erro no envio', resultado.mensagem);
+    } finally {
+      setProcessando(false);
+    }
+  }
+
   function apagarERegerar() {
     if (!ata?.id_documento) return;
     mostrarAlerta('Apagar ata assinada?', 'A ata será removida e poderá ser gerada e assinada novamente.', [
@@ -123,6 +135,8 @@ export default function AtaDetalheScreen() {
               await excluirArquivo(arquivo.id_docpdf);
             }
             await limparAssinaturaAta(idSinistro, idDocumento);
+            // Sem arquivo nem assinatura, o documento não deve continuar na relação.
+            await desvincularDocumentoSeVazio(idSinistro, idDocumento);
             await carregar();
           } finally {
             setProcessando(false);
@@ -191,6 +205,15 @@ export default function AtaDetalheScreen() {
             >
               <Ionicons name="eye-outline" size={18} color="#1c3d5a" />
               <Text style={styles.botaoSecundarioTexto}>Visualizar sem assinatura</Text>
+            </Pressable>
+
+            <Pressable
+              style={[styles.botao, styles.botaoSecundario, processando && styles.botaoDesabilitado]}
+              onPress={enviarAoServidor}
+              disabled={processando}
+            >
+              <Ionicons name="cloud-upload-outline" size={18} color="#1c3d5a" />
+              <Text style={styles.botaoSecundarioTexto}>Enviar ao servidor</Text>
             </Pressable>
 
             <Pressable

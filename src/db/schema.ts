@@ -63,7 +63,7 @@ create table if not exists sinidocpag(id_docpag integer primary key autoincremen
 
 create table if not exists sinidocpdf(id_docpdf integer primary key autoincrement not null,
   id_sinistro integer, id_documento integer, nome_arquivo text,
-  nome_fisico varchar(300), path_fisico varchar(300), enviado boolean,
+  nome_fisico varchar(300), path_fisico varchar(300), enviado boolean, nome_descritivo varchar(120),
   data_insere date, hora_insere time);
 
 create table if not exists sinidoc_exc(id_sinistro integer, id_documento integer, PRIMARY KEY(id_sinistro,id_documento));
@@ -125,7 +125,7 @@ create table if not exists sinimob(id_sinistro integer, id_reguladora integer,
   id_causa_abe integer, km_inicial numeric(12,2), km_final numeric(12,2),
   novo_sini char(1), id_nacionalidade integer, id_civil integer, construcao varchar(100),
   ocupacao varchar(100), nro_predio varchar(20), nro_unidade varchar(20), envio_preliminar char(1), justifica_envio text, id_tipoapolice integer,
-  territorio_nacional boolean, local_determinado boolean,
+  territorio_nacional boolean, local_determinado boolean, item_unico boolean,
   PRIMARY KEY(id_sinistro ASC));
 
 create table if not exists cobertura(id_cobertura integer, nm_cobertura varchar(60), ativo boolean,
@@ -294,12 +294,23 @@ async function aplicarMigracoes(db: Awaited<ReturnType<typeof getDb>>): Promise<
     await db.execAsync('alter table apolice_item add column ordem_item integer');
   }
 
+  const colunasDocPdf = await db.getAllAsync<{ name: string }>("pragma table_info('sinidocpdf')");
+  if (!colunasDocPdf.some((c) => c.name === 'nome_descritivo')) {
+    await db.execAsync('alter table sinidocpdf add column nome_descritivo varchar(120)');
+  }
+
+  const colunasSinimob = await db.getAllAsync<{ name: string }>("pragma table_info('sinimob')");
+  if (!colunasSinimob.some((c) => c.name === 'item_unico')) {
+    await db.execAsync('alter table sinimob add column item_unico boolean');
+  }
+
   // Conserta colunas boolean já importadas com o bug de vir como texto "t"/"f" ou "true"/"false"
   // (ver `n()` em importLogin.ts) — idempotente, seguro rodar em todo boot.
   await db.execAsync(`
     update apolice_item set conferencia = case conferencia when 't' then 1 when 'f' then 0 else conferencia end;
     update maquina_item set conferencia = case conferencia when 't' then 1 when 'f' then 0 else conferencia end;
     update ocupacao set ativo = case ativo when 'true' then 1 when 'false' then 0 when 't' then 1 when 'f' then 0 else ativo end;
+    update sinimob set item_unico = case item_unico when 't' then 1 when 'f' then 0 when 'true' then 1 when 'false' then 0 else item_unico end;
   `);
 }
 

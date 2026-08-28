@@ -9,7 +9,10 @@ export interface InstanciaDocumento {
 
 export interface ArquivoDocumento {
   id_docpdf: number;
+  /** Caminho físico do arquivo — é o que vai pro servidor na transferência. */
   nome_arquivo: string;
+  /** Nome amigável pra exibir na relação (ex.: o nome da ata). Vazio nos arquivos antigos. */
+  nome_descritivo: string;
   enviado: boolean;
 }
 
@@ -134,16 +137,22 @@ export async function listarDocumentos(
       id_docpdf: number;
       id_documento: number;
       nome_arquivo: string | null;
+      nome_descritivo: string | null;
       enviado: number | boolean | null;
     }>(
-      `select id_docpdf, id_documento, nome_arquivo, enviado from sinidocpdf
+      `select id_docpdf, id_documento, nome_arquivo, nome_descritivo, enviado from sinidocpdf
        where id_sinistro = ? and id_documento in (${placeholders})
        order by id_docpdf`,
       [idSinistro, ...idsDocumentos],
     );
     for (const la of linhasArquivos) {
       const lista = arquivosPorDoc.get(la.id_documento) ?? [];
-      lista.push({ id_docpdf: la.id_docpdf, nome_arquivo: la.nome_arquivo ?? '', enviado: !!la.enviado });
+      lista.push({
+        id_docpdf: la.id_docpdf,
+        nome_arquivo: la.nome_arquivo ?? '',
+        nome_descritivo: la.nome_descritivo ?? '',
+        enviado: !!la.enviado,
+      });
       arquivosPorDoc.set(la.id_documento, lista);
     }
   }
@@ -182,12 +191,45 @@ export async function marcarSolicitado(idSinistro: number, idDocumento: number):
         `insert into sinidoc (id_sinistro, id_documento, solicitado, complemento) values (?, ?, 1, '')`,
         [idSinistro, idDocumento],
       );
+    } else {
+      // A linha já existir NÃO significa que o documento está solicitado: o servidor importa o
+      // catálogo inteiro de sinidoc por sinistro, a maioria com solicitado=0. Sem este update,
+      // anexar um arquivo (ou assinar uma ata) a um documento já catalogado não o fazia aparecer
+      // na relação, que por padrão filtra por solicitado=1.
+      await db.runAsync('update sinidoc set solicitado = 1 where id_sinistro = ? and id_documento = ?', [
+        idSinistro,
+        idDocumento,
+      ]);
     }
     await db.runAsync('delete from sinidoc_exc where id_sinistro = ? and id_documento = ?', [idSinistro, idDocumento]);
     await db.runAsync("update btn_permissoes set sit_botao = 'S' where id_sinistro = ? and nm_botao = 'docs'", [
       idSinistro,
     ]);
   });
+}
+
+/**
+ * Contrapartida de marcarSolicitado, usada ao apagar uma ata/termo assinado: o documento só
+ * continua "solicitado" enquanto ainda houver algum arquivo anexado a ele. Sem isso, apagar a ata
+ * apagava o PDF e a assinatura mas deixava o documento pendurado na relação, vazio.
+ *
+ * Diferente de removerSolicitacao, aqui a linha de sinidoc é preservada (e nada vai pra
+ * sinidoc_exc): é só o vínculo que cai, não um pedido de exclusão do documento.
+ */
+export async function desvincularDocumentoSeVazio(idSinistro: number, idDocumento: number): Promise<void> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<{ total: number }>(
+    `select
+       (select count(*) from sinidocpdf where id_sinistro = ? and id_documento = ?) +
+       (select count(*) from sinidocpag where id_sinistro = ? and id_documento = ?) as total`,
+    [idSinistro, idDocumento, idSinistro, idDocumento],
+  );
+  if ((row?.total ?? 0) > 0) return;
+
+  await db.runAsync('update sinidoc set solicitado = 0 where id_sinistro = ? and id_documento = ?', [
+    idSinistro,
+    idDocumento,
+  ]);
 }
 
 /** Porta de ConfirmaRemocao/RemoverDocumento (reldocumento_def.js). */
@@ -316,20 +358,40 @@ export async function definirFormatoPagina(idPagina: number, formato: '1' | '2' 
 /** Arquivos anexados via upload (não fotografados) — sinidocpdf. */
 export async function listarArquivos(idSinistro: number, idDocumento: number): Promise<ArquivoDocumento[]> {
   const db = await getDb();
-  const linhas = await db.getAllAsync<{ id_docpdf: number; nome_arquivo: string | null; enviado: number | boolean | null }>(
-    'select id_docpdf, nome_arquivo, enviado from sinidocpdf where id_sinistro = ? and id_documento = ? order by id_docpdf',
+  const linhas = await db.getAllAsync<{
+    id_docpdf: number;
+    nome_arquivo: string | null;
+    nome_descritivo: string | null;
+    enviado: number | boolean | null;
+  }>(
+    'select id_docpdf, nome_arquivo, nome_descritivo, enviado from sinidocpdf where id_sinistro = ? and id_documento = ? order by id_docpdf',
     [idSinistro, idDocumento],
   );
-  return linhas.map((l) => ({ id_docpdf: l.id_docpdf, nome_arquivo: l.nome_arquivo ?? '', enviado: !!l.enviado }));
+  return linhas.map((l) => ({
+    id_docpdf: l.id_docpdf,
+    nome_arquivo: l.nome_arquivo ?? '',
+    nome_descritivo: l.nome_descritivo ?? '',
+    enviado: !!l.enviado,
+  }));
 }
 
-export async function inserirArquivo(idSinistro: number, idDocumento: number, arquivo: string): Promise<void> {
+/**
+ * `arquivo` é o caminho físico (o que a transferência envia). `nomeDescritivo` é só pra exibição
+ * na relação de documentos — quando vem de uma ata, é o mesmo nome mostrado na tela de Atas e
+ * Termos; quando o usuário anexa um PDF avulso, fica vazio e a tela cai no nome do arquivo.
+ */
+export async function inserirArquivo(
+  idSinistro: number,
+  idDocumento: number,
+  arquivo: string,
+  nomeDescritivo = '',
+): Promise<void> {
   const db = await getDb();
   await db.withTransactionAsync(async () => {
     await db.runAsync(
-      `insert into sinidocpdf (id_sinistro, id_documento, nome_arquivo, enviado, data_insere, hora_insere)
-       values (?, ?, ?, 0, date('now'), time('now'))`,
-      [idSinistro, idDocumento, arquivo],
+      `insert into sinidocpdf (id_sinistro, id_documento, nome_arquivo, nome_descritivo, enviado, data_insere, hora_insere)
+       values (?, ?, ?, ?, 0, date('now'), time('now'))`,
+      [idSinistro, idDocumento, arquivo, nomeDescritivo],
     );
     await db.runAsync("update sinimob set novo_sini = 'N' where id_sinistro = ?", [idSinistro]);
   });
@@ -457,15 +519,20 @@ export interface ArquivoParaTransferencia {
 /**
  * sinidocpdf guarda tanto arquivos anexados manualmente (DocumentPicker) quanto PDFs de Atas
  * assinadas (assinar.tsx chama o mesmo inserirArquivo) — ataseg_doc é o catálogo que diz qual
- * id_documento pertence a qual modelo de ata (por seguradora/produto), então dá pra distinguir
- * os dois casos sem precisar de uma coluna nova.
+ * id_documento pertence a qual modelo de ata, então dá pra distinguir os dois casos sem precisar
+ * de uma coluna nova.
+ *
+ * O casamento é só por seguradora, sem filtrar por produto: listarAtasDisponiveis (db/atas.ts) usa
+ * fallback produto -> seguradora, então uma ata pode ter sido gerada a partir de um modelo cadastrado
+ * em outro produto da mesma seguradora. Com o filtro de produto aqui, essas atas não eram
+ * reconhecidas — sumiam da transferência de "Atas e Termos" (que respondia "nada a transferir" e
+ * marcava como enviado sem enviar nada) e ainda vazavam pra transferência de "Documentos".
  */
 const CONDICAO_E_ATA = `exists (
        select 1 from ataseg_doc ad
        inner join sinimob sm on sm.id_sinistro = sp.id_sinistro
        where ad.id_documento = sp.id_documento
          and ad.id_seguradora = sm.id_seguradora
-         and (ad.id_produto = sm.id_produto or ad.id_produto is null)
      )`;
 
 /** Arquivos já prontos (sinidocpdf, anexados via DocumentPicker) ainda não confirmados no servidor — não inclui Atas/Termos, que têm opção própria. */
@@ -526,8 +593,18 @@ export async function marcarArquivoEnviado(idDocpdf: number): Promise<void> {
   await db.runAsync('update sinidocpdf set enviado = 1 where id_docpdf = ?', [idDocpdf]);
 }
 
-/** Atas/Termos assinadas (sinidocpdf, ver CONDICAO_E_ATA) ainda não confirmadas no servidor — opção própria, separada de "Documentos". */
-export async function listarAtasParaTransferencia(idSinistro: number): Promise<ArquivoParaTransferencia[]> {
+/**
+ * Atas/Termos assinadas (sinidocpdf, ver CONDICAO_E_ATA), separadas de "Documentos".
+ *
+ * `incluirEnviadas` reenvia também as que já constam como enviadas: quando o usuário marca
+ * "Atas e Termos" na tela de transferência, ele está pedindo o envio explicitamente, e responder
+ * "nada a transferir" (marcando como sucesso) esconde qualquer ata que o servidor não tenha
+ * recebido de fato.
+ */
+export async function listarAtasParaTransferencia(
+  idSinistro: number,
+  incluirEnviadas = false,
+): Promise<ArquivoParaTransferencia[]> {
   const db = await getDb();
   const linhas = await db.getAllAsync<{
     id_docpdf: number;
@@ -540,7 +617,8 @@ export async function listarAtasParaTransferencia(idSinistro: number): Promise<A
      from sinidocpdf sp
      inner join documentos dc on dc.id_documento = sp.id_documento
      left join sinidoc sd on sd.id_sinistro = sp.id_sinistro and sd.id_documento = sp.id_documento
-     where sp.id_sinistro = ? and (sp.enviado is null or sp.enviado = 0) and ${CONDICAO_E_ATA}`,
+     where sp.id_sinistro = ?${incluirEnviadas ? '' : ' and (sp.enviado is null or sp.enviado = 0)'}
+       and ${CONDICAO_E_ATA}`,
     [idSinistro],
   );
   return linhas.map((l) => ({

@@ -72,6 +72,15 @@ function diretorioArquivos(idSinistro: number): Directory {
   return new Directory(Paths.document, 'RegulareFiles', String(idSinistro), 'Docs');
 }
 
+/**
+ * O que aparece na relação: o nome descritivo (ex.: "Ata de Vistoria", igual à tela de Atas e
+ * Termos) quando existe, senão o nome do arquivo. O caminho físico continua intacto em
+ * nome_arquivo — é ele que abre o arquivo e vai pro servidor na transferência.
+ */
+function nomeExibicaoArquivo(arquivo: ArquivoDocumento): string {
+  return arquivo.nome_descritivo.trim() || (arquivo.nome_arquivo.split('/').pop() ?? '');
+}
+
 export default function DocumentosScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const idSinistro = Number(id);
@@ -243,7 +252,7 @@ export default function DocumentosScreen() {
   }
 
   function confirmarExclusaoArquivo(arquivo: ArquivoDocumento) {
-    mostrarAlerta('Remover arquivo anexado?', arquivo.nome_arquivo.split('/').pop() ?? '', [
+    mostrarAlerta('Remover arquivo anexado?', nomeExibicaoArquivo(arquivo), [
       { text: 'Não' },
       {
         text: 'Sim',
@@ -427,7 +436,7 @@ export default function DocumentosScreen() {
                       <Pressable style={styles.itemArquivoToque} onPress={() => abrirArquivo(arquivo)}>
                         <Ionicons name="document-outline" size={18} color="#1c3d5a" />
                         <Text style={styles.itemArquivoTexto} numberOfLines={1}>
-                          {arquivo.nome_arquivo.split('/').pop()}
+                          {nomeExibicaoArquivo(arquivo)}
                         </Text>
                       </Pressable>
                       <Pressable

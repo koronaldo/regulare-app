@@ -4,16 +4,37 @@ import type { OpcaoLista } from './sinistros';
 
 export type TipoApolice = 'PRE' | 'MAQ' | string;
 
-export async function buscarTipoApolice(idSinistro: number): Promise<TipoApolice | null> {
+export interface ContextoApolice {
+  tipo_apolice: TipoApolice | null;
+  /** Só faz sentido em apólice MAQ: o risco é o território nacional inteiro (máquina itinerante). */
+  territorio_nacional: boolean;
+  /** Só faz sentido em apólice MAQ: o risco é um endereço fixo, igual ao Predial. */
+  local_determinado: boolean;
+}
+
+/**
+ * Tipo da apólice + os dois flags de abrangência do risco (Cadastro Geral), que juntos decidem
+ * qual questionário de Informações Gerais é montado — ver CHECKLIST_ENDERECO/CHECKLIST_MAQUINA
+ * em app/sinistro/[id]/informacoes.tsx.
+ */
+export async function buscarContextoApolice(idSinistro: number): Promise<ContextoApolice> {
   const db = await getDb();
-  const row = await db.getFirstAsync<{ tipo_apolice: string }>(
-    `select ta.tipo_apolice
+  const row = await db.getFirstAsync<{
+    tipo_apolice: string | null;
+    territorio_nacional: number | null;
+    local_determinado: number | null;
+  }>(
+    `select ta.tipo_apolice, sm.territorio_nacional, sm.local_determinado
      from sinimob sm
-     inner join tipoapolice ta on sm.id_tipoapolice = ta.id_tipoapolice
+     left join tipoapolice ta on sm.id_tipoapolice = ta.id_tipoapolice
      where sm.id_sinistro = ?`,
     [idSinistro],
   );
-  return row?.tipo_apolice ?? null;
+  return {
+    tipo_apolice: row?.tipo_apolice ?? null,
+    territorio_nacional: !!row?.territorio_nacional,
+    local_determinado: !!row?.local_determinado,
+  };
 }
 
 export interface DadosEnderecoSinistro {
@@ -21,26 +42,87 @@ export interface DadosEnderecoSinistro {
   bairro: string | null;
   cep: string | null;
   nro_predio: string | null;
+  nro_unidade: string | null;
   id_estado: string | null;
   id_cidade: number | null;
   ocupacao: string | null;
   construcao: string | null;
+  /** Apólice de item único: pré-preenche o item "Item da apólice" com o texto fixo. */
+  item_unico: number | null;
 }
 
 /** Dados já preenchidos no Cadastro Geral, usados como valor padrão do checklist de Informações. */
 export async function buscarDadosEnderecoSinistro(idSinistro: number): Promise<DadosEnderecoSinistro | null> {
   const db = await getDb();
   const row = await db.getFirstAsync<DadosEnderecoSinistro>(
-    `select endereco, bairro, cep, nro_predio, id_estado, id_cidade, ocupacao, construcao
+    `select endereco, bairro, cep, nro_predio, nro_unidade, id_estado, id_cidade, ocupacao, construcao, item_unico
      from sinimob where id_sinistro = ?`,
     [idSinistro],
   );
   return row ?? null;
 }
 
+/** Quanto de "Informações Gerais" já foi preenchido — usado pra avisar antes de trocar o tipo da apólice. */
+export interface ResumoInformacoesGerais {
+  /** Respostas do questionário de endereço (sinistro_apolice). */
+  itensApolice: number;
+  /** Máquinas cadastradas (sinibenfe tipo_bene='MAQ'). */
+  maquinas: number;
+  /** Respostas do checklist das máquinas (sinistro_maquina). */
+  respostasMaquina: number;
+}
+
+export async function contarInformacoesGerais(idSinistro: number): Promise<ResumoInformacoesGerais> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<ResumoInformacoesGerais>(
+    `select
+       (select count(*) from sinistro_apolice where id_sinistro = ?) as itensApolice,
+       (select count(*) from sinibenfe where id_sinistro = ? and tipo_bene = 'MAQ') as maquinas,
+       (select count(*) from sinistro_maquina where id_sinistro = ?) as respostasMaquina`,
+    [idSinistro, idSinistro, idSinistro],
+  );
+  return row ?? { itensApolice: 0, maquinas: 0, respostasMaquina: 0 };
+}
+
+/**
+ * Apaga o que ficou preso ao tipo antigo da apólice ao trocar Prédio <-> Máquina: os dois
+ * questionários e as máquinas. As benfeitorias (sinibenfe tipo_bene='PRE') NÃO entram — elas
+ * aparecem nos dois tipos e não têm relação com a troca. Também devolve o botão "informacoes"
+ * pra pendente, já que o checklist volta a estar sem resposta.
+ */
+export async function limparInformacoesGerais(idSinistro: number): Promise<void> {
+  const db = await getDb();
+  await db.withTransactionAsync(async () => {
+    await db.runAsync('delete from sinistro_apolice where id_sinistro = ?', [idSinistro]);
+    await db.runAsync('delete from sinistro_maquina where id_sinistro = ?', [idSinistro]);
+    await db.runAsync("delete from sinibenfe where id_sinistro = ? and tipo_bene = 'MAQ'", [idSinistro]);
+    await db.runAsync("update btn_permissoes set sit_botao = 'N' where id_sinistro = ? and nm_botao = 'informacoes'", [
+      idSinistro,
+    ]);
+  });
+
+  await registrarLog(idSinistro, 'Informações Gerais removidas por troca de tipo de apólice');
+}
+
+/**
+ * Máquina em local determinado responde só a localização do risco: Cidade/UF, Bairro,
+ * Logradouro, Nº prédio, Nº unidade e CEP (apolice_item.id_item 3 a 8). Os itens de prédio
+ * (Ocupação, Construção, Item da apólice, Propriedade, Proprietário, Tempo de instalação) não
+ * se aplicam e ficam fora do questionário.
+ */
+export const ITENS_APOLICE_MAQUINA_LOCAL = [3, 4, 5, 6, 7, 8];
+
+/** Filtra o questionário de endereço conforme o tipo da apólice (Predial responde todos). */
+export function itensApoliceDoContexto(contexto: ContextoApolice, itens: ItemApolice[]): ItemApolice[] {
+  if (contexto.tipo_apolice !== 'MAQ') return itens;
+  return itens.filter((i) => ITENS_APOLICE_MAQUINA_LOCAL.includes(i.id_item));
+}
+
 export interface ItemApolice {
   id_item: number;
   descricao_item: string;
+  /** Posição do item no questionário (o "N" de descricaoN no legado). Null em bases antigas. */
+  ordem_item: number | null;
   referencia: string | null;
   lista_selecao: string | null;
   conferencia: boolean;
@@ -56,6 +138,7 @@ export interface ItemApolice {
 interface LinhaItemApolice {
   id_item: number;
   descricao_apolice_item: string;
+  ordem_item: number | null;
   referencia: string | null;
   lista_selecao: string | null;
   conferencia: number | null;
@@ -72,7 +155,7 @@ interface LinhaItemApolice {
 export async function buscarItensApolice(idSinistro: number): Promise<ItemApolice[]> {
   const db = await getDb();
   const linhas = await db.getAllAsync<LinhaItemApolice>(
-    `select ai.id_item, ai.descricao as descricao_apolice_item, ai.referencia, ai.lista_selecao, ai.conferencia,
+    `select ai.id_item, ai.descricao as descricao_apolice_item, ai.ordem_item, ai.referencia, ai.lista_selecao, ai.conferencia,
        sa.descricao, sa.confere, sa.complemento, sa.id_estado, sa.id_cidade, sa.id_estado_ori, sa.id_cidade_ori
      from apolice_item ai
      left join sinistro_apolice sa on ai.id_item = sa.id_item and sa.id_sinistro = ?
@@ -83,6 +166,9 @@ export async function buscarItensApolice(idSinistro: number): Promise<ItemApolic
   return linhas.map((l) => ({
     id_item: l.id_item,
     descricao_item: l.descricao_apolice_item,
+    // ordem_item é integer no servidor, mas em bases antigas veio como texto pela migração — o
+    // Number() garante que o mapa posicional de pré-preenchimento case por número, não por string.
+    ordem_item: l.ordem_item == null ? null : Number(l.ordem_item),
     referencia: l.referencia,
     lista_selecao: l.lista_selecao,
     conferencia: !!l.conferencia,
@@ -503,6 +589,7 @@ export interface DadosBasicosMaquina {
   chassi: string;
   placa: string;
   total_km: string;
+  obs_benfe: string;
   construcao: string;
 }
 
@@ -510,7 +597,7 @@ export async function buscarDadosBasicosMaquina(idBenmaq: number): Promise<Dados
   const db = await getDb();
   // total_km é numeric(12,2): se o valor salvo "parece" número puro, o SQLite devolve number, não string.
   const row = await db.getFirstAsync<Record<Exclude<keyof DadosBasicosMaquina, 'total_km'>, string | null> & { total_km: string | number | null }>(
-    `select item_apolice, nm_benfeito, marca, modelo, ano, nro_serie, chassi, placa, total_km, construcao
+    `select item_apolice, nm_benfeito, marca, modelo, ano, nro_serie, chassi, placa, total_km, obs_benfe, construcao
      from sinibenfe where id_sinibenfe = ?`,
     [idBenmaq],
   );
@@ -525,6 +612,7 @@ export async function buscarDadosBasicosMaquina(idBenmaq: number): Promise<Dados
     chassi: row.chassi ?? '',
     placa: row.placa ?? '',
     total_km: row.total_km != null ? String(row.total_km) : '',
+    obs_benfe: row.obs_benfe ?? '',
     construcao: row.construcao ?? '',
   };
 }
@@ -598,7 +686,7 @@ export async function salvarMaquina(
   await db.withTransactionAsync(async () => {
     await db.runAsync(
       `update sinibenfe set nm_benfeito = ?, marca = ?, modelo = ?, ano = ?, nro_serie = ?, chassi = ?,
-         placa = ?, total_km = ?, construcao = ?, item_apolice = ?
+         placa = ?, total_km = ?, obs_benfe = ?, construcao = ?, item_apolice = ?
        where id_sinibenfe = ?`,
       [
         dadosBasicos.nm_benfeito,
@@ -609,6 +697,7 @@ export async function salvarMaquina(
         dadosBasicos.chassi,
         dadosBasicos.placa,
         dadosBasicos.total_km,
+        dadosBasicos.obs_benfe,
         dadosBasicos.construcao,
         dadosBasicos.item_apolice,
         idBenmaq,

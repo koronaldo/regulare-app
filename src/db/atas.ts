@@ -34,31 +34,46 @@ async function buscarBaseSinistro(idSinistro: number): Promise<SinistroBaseAta |
   );
 }
 
-/** Porta de InicializaBotoes (gera_config_pdf.js): lista os modelos de ata disponíveis para a seguradora/produto do sinistro. */
+/**
+ * Porta de InicializaBotoes (gera_config_pdf.js): lista os modelos de ata disponíveis para a
+ * seguradora/produto do sinistro.
+ *
+ * Fallback produto -> seguradora: quando não há nenhum modelo associado ao produto do sinistro,
+ * valem os modelos da seguradora (qualquer produto). É a mesma regra que buscarLayoutsAta já
+ * aplica pras páginas de layout — sem ela, um sinistro cujo produto não foi cadastrado em
+ * ataseg_doc ficava sem nenhuma ata pra imprimir ou assinar.
+ */
 export async function listarAtasDisponiveis(idSinistro: number): Promise<AtaDisponivel[]> {
   const base = await buscarBaseSinistro(idSinistro);
   if (!base || !base.id_seguradora) return [];
   const db = await getDb();
 
-  const linhas = await db.getAllAsync<{
-    id_modata: number;
-    id_documento: number | null;
-    nm_modata: string;
-    nome_simple: string | null;
-    simbolo: string | null;
-    chave_sign: string | null;
-    total_arquivos: number;
-  }>(
-    `select distinct ad.id_modata, ad.id_documento, ma.nm_modata, ma.nome_simple, ma.simbolo,
-       sd.chave_sign,
-       (select count(*) from sinidocpdf sp where sp.id_sinistro = ? and sp.id_documento = ad.id_documento) as total_arquivos
-     from ataseg_doc ad
-     inner join modelo_atas ma on ma.id_modata = ad.id_modata
-     left join sinidoc sd on sd.id_sinistro = ? and sd.id_documento = ad.id_documento
-     where ad.id_seguradora = ? and (ad.id_produto = ? or ad.id_produto is null)
-     order by ma.nm_modata`,
-    [idSinistro, idSinistro, base.id_seguradora, base.id_produto],
-  );
+  async function buscar(filtrarPorProduto: boolean) {
+    return db.getAllAsync<{
+      id_modata: number;
+      id_documento: number | null;
+      nm_modata: string;
+      nome_simple: string | null;
+      simbolo: string | null;
+      chave_sign: string | null;
+      total_arquivos: number;
+    }>(
+      `select distinct ad.id_modata, ad.id_documento, ma.nm_modata, ma.nome_simple, ma.simbolo,
+         sd.chave_sign,
+         (select count(*) from sinidocpdf sp where sp.id_sinistro = ? and sp.id_documento = ad.id_documento) as total_arquivos
+       from ataseg_doc ad
+       inner join modelo_atas ma on ma.id_modata = ad.id_modata
+       left join sinidoc sd on sd.id_sinistro = ? and sd.id_documento = ad.id_documento
+       where ad.id_seguradora = ?${filtrarPorProduto ? ' and (ad.id_produto = ? or ad.id_produto is null)' : ''}
+       order by ma.nm_modata`,
+      filtrarPorProduto
+        ? [idSinistro, idSinistro, base!.id_seguradora, base!.id_produto]
+        : [idSinistro, idSinistro, base!.id_seguradora],
+    );
+  }
+
+  const doProduto = await buscar(true);
+  const linhas = doProduto.length > 0 ? doProduto : await buscar(false);
 
   return linhas.map((l) => ({
     id_modata: l.id_modata,
@@ -70,17 +85,25 @@ export async function listarAtasDisponiveis(idSinistro: number): Promise<AtaDisp
   }));
 }
 
+/** Mesmo fallback produto -> seguradora de listarAtasDisponiveis, senão a ata listada não resolveria o documento. */
 export async function resolverDocumentoDaAta(idSinistro: number, idModata: number): Promise<number | null> {
   const base = await buscarBaseSinistro(idSinistro);
   if (!base || !base.id_seguradora) return null;
   const db = await getDb();
-  const row = await db.getFirstAsync<{ id_documento: number | null }>(
+
+  const doProduto = await db.getFirstAsync<{ id_documento: number | null }>(
     `select id_documento from ataseg_doc
      where id_seguradora = ? and (id_produto = ? or id_produto is null) and id_modata = ?
      limit 1`,
     [base.id_seguradora, base.id_produto, idModata],
   );
-  return row?.id_documento ?? null;
+  if (doProduto) return doProduto.id_documento ?? null;
+
+  const daSeguradora = await db.getFirstAsync<{ id_documento: number | null }>(
+    'select id_documento from ataseg_doc where id_seguradora = ? and id_modata = ? limit 1',
+    [base.id_seguradora, idModata],
+  );
+  return daSeguradora?.id_documento ?? null;
 }
 
 /**
@@ -434,6 +457,7 @@ export async function montarVariaveisAta(idSinistro: number, assinaturaBase64: s
  */
 const MARGEM_CM_POR_MODATA: Record<number, number> = {
   1: 2.5, // Aviso de Sinistro
+  2: 2, // Outros Seguros — conteúdo de 210mm (largura A4 cheia), 2cm de margem de cada lado
   3: 1.5, // Autorização de Crédito
 };
 

@@ -521,6 +521,11 @@ const DYNAMIC_IMPORTS: ImportSpec[] = [
       'id_estado_ori',
       'id_cidade_ori',
     ],
+    // A troca id_estado <-> id_estado_ori (e cidade) é intencional e espelha a que a subida já
+    // faz em atualiza_informacoes_sinistro.php: no servidor o par _ori guarda o valor da apólice
+    // (a referência) e o par sem sufixo guarda o que o regulador encontrou; localmente é o
+    // contrário. Sem inverter aqui também, um sinistro que volta do servidor com o checklist já
+    // respondido reaparecia com "UF/Cidade" e "UF/Cidade encontrado" invertidos.
     values: (r) => [
       n(r.id_sinistro),
       n(r.id_item),
@@ -528,10 +533,10 @@ const DYNAMIC_IMPORTS: ImportSpec[] = [
       n(r.confere),
       n(r.complemento),
       n(r.id_apolice),
-      n(r.id_estado),
-      n(r.id_cidade),
       n(r.id_estado_ori),
       n(r.id_cidade_ori),
+      n(r.id_estado),
+      n(r.id_cidade),
     ],
     deleteWhereOnce: { columns: ['id_sinistro'], values: (first) => [n(first.id_sinistro)] },
   },
@@ -643,7 +648,7 @@ const SINIMOB_COLUMNS = [
   'contato_corretora_alternativo', 'fone_corretora_alternativo',
   'id_causa_abe', 'id_sucursal', 'construcao', 'ocupacao', 'id_nacionalidade',
   'id_civil', 'nro_predio', 'nro_unidade', 'envio_preliminar', 'id_tipoapolice',
-  'territorio_nacional', 'local_determinado',
+  'territorio_nacional', 'local_determinado', 'item_unico',
 ];
 
 function sinimobValues(r: Row): BindValue[] {
@@ -663,7 +668,7 @@ function sinimobValues(r: Row): BindValue[] {
     n(r.contato_corretora_alternativo), n(r.fone_corretora_alternativo),
     n(r.id_causa_abe), n(r.id_sucursal), n(r.construcao), n(r.ocupacao), n(r.id_nacionalidade),
     n(r.id_civil), n(r.nro_predio), n(r.nro_unidade), 'N', n(r.id_tipoapolice),
-    n(r.territorio_nacional), n(r.local_determinado),
+    n(r.territorio_nacional), n(r.local_determinado), n(r.item_unico),
   ];
 }
 

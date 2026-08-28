@@ -34,6 +34,7 @@ import {
   type CorretoraInfo,
   type TipoApoliceCodigo,
 } from '../../../src/db/sinistros';
+import { contarInformacoesGerais, limparInformacoesGerais } from '../../../src/db/informacoes';
 import { mostrarAlerta } from '../../../src/utils/alerta';
 import { cnpjValido, cpfValido, formatarCNPJ, formatarCPF } from '../../../src/utils/documentos';
 import { formatarTelefone } from '../../../src/utils/telefone';
@@ -158,6 +159,8 @@ export default function CadastroSinistroScreen() {
   const [relacoes, setRelacoes] = useState<OpcaoSelecao[]>([]);
   const [tiposApolice, setTiposApolice] = useState<OpcaoSelecao[]>([]);
   const [codigosTipoApolice, setCodigosTipoApolice] = useState<TipoApoliceCodigo[]>([]);
+  /** Tipo que veio do banco — comparar com o do form diz se a troca precisa limpar Inf. Gerais. */
+  const [tipoApoliceOriginal, setTipoApoliceOriginal] = useState('');
   const [corretora, setCorretora] = useState<CorretoraInfo | null>(null);
   const [cabecalho, setCabecalho] = useState({ segurado: '', sinistro: '' });
   const [erroCampo, setErroCampo] = useState<{ campo: keyof FormState; mensagem: string } | null>(null);
@@ -226,6 +229,7 @@ export default function CadastroSinistroScreen() {
         }
 
         if (!cancelado) {
+          setTipoApoliceOriginal(sinistro.id_tipoapolice != null ? String(sinistro.id_tipoapolice) : '');
           setForm({
             nm_segurado: sinistro.nm_segurado ?? '',
             tipo_doc: sinistro.tipo_doc ?? '',
@@ -293,14 +297,55 @@ export default function CadastroSinistroScreen() {
     setCidades(lista);
   }
 
-  /** Local Determinado/Território Nacional só fazem sentido pra apólice de Máquina — troca pra outro tipo desmarca os dois. */
-  function mudarTipoApolice(valor: string) {
+  function codigoDoTipo(valor: string): string | undefined {
+    return codigosTipoApolice.find((t) => String(t.id_tipoapolice) === valor)?.tipo_apolice;
+  }
+
+  /** Local Determinado/Território Nacional só fazem sentido pra apólice de Máquina. */
+  const ehMaquina = codigoDoTipo(form.id_tipoapolice) === 'MAQ';
+
+  function aplicarTipoApolice(valor: string) {
     atualizar('id_tipoapolice', valor);
-    const codigo = codigosTipoApolice.find((t) => String(t.id_tipoapolice) === valor)?.tipo_apolice;
-    if (codigo !== 'MAQ') {
+    if (codigoDoTipo(valor) !== 'MAQ') {
       atualizar('local_determinado', false);
       atualizar('territorio_nacional', false);
     }
+  }
+
+  /**
+   * Trocar Prédio <-> Máquina invalida tudo que foi respondido em Informações Gerais (os dois
+   * questionários e as máquinas), então avisa e confirma antes. A remoção em si só acontece ao
+   * salvar — assim sair da tela sem salvar não apaga nada.
+   */
+  async function mudarTipoApolice(valor: string) {
+    if (valor === form.id_tipoapolice) return;
+
+    // Voltar pro tipo que está gravado não perde nada: nada foi removido ainda.
+    if (valor === tipoApoliceOriginal) {
+      aplicarTipoApolice(valor);
+      return;
+    }
+
+    const resumo = await contarInformacoesGerais(idSinistro);
+    const total = resumo.itensApolice + resumo.maquinas + resumo.respostasMaquina;
+    if (total === 0) {
+      aplicarTipoApolice(valor);
+      return;
+    }
+
+    const partes: string[] = [];
+    if (resumo.itensApolice > 0) partes.push(`${resumo.itensApolice} resposta(s) do questionário`);
+    if (resumo.maquinas > 0) partes.push(`${resumo.maquinas} máquina(s)`);
+    if (resumo.respostasMaquina > 0) partes.push(`${resumo.respostasMaquina} resposta(s) de máquina`);
+
+    mostrarAlerta(
+      'Trocar o tipo de apólice?',
+      `As Informações Gerais deste sinistro serão removidas ao salvar: ${partes.join(', ')}.\n\nAs benfeitorias são mantidas.`,
+      [
+        { text: 'Cancelar' },
+        { text: 'Trocar', onPress: () => aplicarTipoApolice(valor) },
+      ],
+    );
   }
 
   function mudarLocalDeterminado(valor: boolean) {
@@ -472,6 +517,12 @@ export default function CadastroSinistroScreen() {
         data_aviso: form.data_aviso,
         id_preserva: form.id_preserva,
       });
+      // O aviso na troca prometeu remover as Informações Gerais ao salvar — é aqui que acontece.
+      if (form.id_tipoapolice !== tipoApoliceOriginal) {
+        await limparInformacoesGerais(idSinistro);
+        setTipoApoliceOriginal(form.id_tipoapolice);
+      }
+
       mostrarAlerta('Sucesso', 'Atualizado com sucesso!!!', [
         {
           text: 'OK',
@@ -628,8 +679,20 @@ export default function CadastroSinistroScreen() {
             opcoes={tiposApolice}
             onChange={mudarTipoApolice}
           />
-          <Interruptor label="Local Determinado" valor={form.local_determinado} onChange={mudarLocalDeterminado} />
-          <Interruptor label="Território Nacional" valor={form.territorio_nacional} onChange={mudarTerritorioNacional} />
+          <Interruptor
+            label="Local Determinado"
+            valor={form.local_determinado}
+            onChange={mudarLocalDeterminado}
+            desabilitado={!ehMaquina}
+            ajuda="Só para apólice do tipo Máquina"
+          />
+          <Interruptor
+            label="Território Nacional"
+            valor={form.territorio_nacional}
+            onChange={mudarTerritorioNacional}
+            desabilitado={!ehMaquina}
+            ajuda="Só para apólice do tipo Máquina"
+          />
         </Secao>
 
         <Secao titulo="Quem atendeu?">

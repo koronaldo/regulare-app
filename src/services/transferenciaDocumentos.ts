@@ -11,6 +11,7 @@ import {
   type ArquivoParaTransferencia,
 } from '../db/documentos';
 import { gerarPdfDePaginas } from '../utils/documentoPdf';
+import { compactarImagemParaEnvio, LIMITE_COMPACTACAO_BYTES, tamanhoDoArquivo } from '../utils/compactacao';
 import { lerCredenciais } from './credenciais';
 import { requireApiUrl, type ResultadoTransferencia } from './apiTransferencia';
 
@@ -87,10 +88,13 @@ async function enviarArquivosProntos(
   const falhas: string[] = [];
 
   for (const arquivo of arquivos) {
+    // Acima de 3MB o arquivo é compactado antes de subir. Só imagens têm como ser compactadas
+    // aqui — um PDF grande já anexado volta inalterado (não há compressor de PDF no app).
+    const uriEnvio = await compactarImagemParaEnvio(arquivo.nome_arquivo);
     const resultado = await enviarPdf(
       idSinistro,
       {
-        uri: arquivo.nome_arquivo,
+        uri: uriEnvio,
         idDocumento: arquivo.id_documento,
         chaveLocal: `PDF${arquivo.id_docpdf}`,
         nomeBase: nomeBaseDocumento(arquivo.nm_documento, arquivo.complemento),
@@ -103,7 +107,15 @@ async function enviarArquivosProntos(
       enviados++;
       await marcarArquivoEnviado(arquivo.id_docpdf);
     } else {
-      falhas.push(`${arquivo.nm_documento}: ${resultado.mensagem}`);
+      // O tamanho entra na mensagem porque a causa mais comum de falha aqui é o arquivo estourar
+      // o post_max_size do servidor — e nesse caso o PHP perde o $_POST e responde "usuário ou
+      // senha inválidos", que não diz nada sobre o motivo real.
+      const bytes = tamanhoDoArquivo(uriEnvio);
+      const tamanho =
+        bytes > 0
+          ? ` (${(bytes / 1048576).toFixed(1)}MB${bytes > LIMITE_COMPACTACAO_BYTES ? ', acima do limite' : ''})`
+          : '';
+      falhas.push(`${arquivo.nm_documento}${tamanho}: ${resultado.mensagem}`);
     }
   }
 
@@ -279,15 +291,50 @@ export async function transferirInstanciaUnica(
  * Termos assinadas (sinidocpdf, identificadas via ataseg_doc) separadamente de "Documentos" —
  * opção própria na tela de transferência.
  */
+/**
+ * Envia só as atas de um modelo (id_documento), sem passar pela tela de transferência. Reenvia
+ * mesmo o que já consta como enviado — é um pedido explícito do usuário na tela da ata.
+ */
+export async function transferirAtaIndividual(
+  idSinistro: number,
+  idDocumento: number,
+): Promise<ResultadoTransferencia> {
+  const credenciais = await lerCredenciais();
+  if (!credenciais) {
+    return { sucesso: false, mensagem: 'Nenhuma sessão salva. Faça login novamente.' };
+  }
+
+  const todas = await listarAtasParaTransferencia(idSinistro, true);
+  const desteModelo = todas.filter((a) => a.id_documento === idDocumento);
+  if (desteModelo.length === 0) {
+    return { sucesso: false, mensagem: 'Nenhum arquivo assinado encontrado para esta ata.' };
+  }
+
+  const { enviados, falhas } = await enviarArquivosProntos(
+    idSinistro,
+    desteModelo,
+    credenciais.usuario,
+    credenciais.senhaEnvio,
+  );
+
+  if (falhas.length === 0) {
+    return { sucesso: true, mensagem: `${enviados} arquivo(s) enviado(s) com sucesso.` };
+  }
+  return { sucesso: false, mensagem: falhas.join('\n') };
+}
+
 export async function transferirAtas(idSinistro: number): Promise<ResultadoTransferencia> {
   const credenciais = await lerCredenciais();
   if (!credenciais) {
     return { sucesso: false, mensagem: 'Nenhuma sessão salva. Faça login novamente.' };
   }
 
-  const atas = await listarAtasParaTransferencia(idSinistro);
+  // Reenvia inclusive as já marcadas como enviadas: marcar "Atas e Termos" na tela é um pedido
+  // explícito de envio, e responder "nada a transferir" como sucesso mascarava atas que o
+  // servidor nunca recebeu.
+  const atas = await listarAtasParaTransferencia(idSinistro, true);
   if (atas.length === 0) {
-    return { sucesso: true, mensagem: 'Nenhuma ata/termo para transferir.' };
+    return { sucesso: false, mensagem: 'Nenhuma ata/termo assinado neste sinistro para transferir.' };
   }
 
   const { enviados, falhas } = await enviarArquivosProntos(idSinistro, atas, credenciais.usuario, credenciais.senhaEnvio);

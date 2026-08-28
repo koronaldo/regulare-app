@@ -11,15 +11,17 @@ import * as Location from 'expo-location';
 import { listarSinistrosParaRoteiro, type SinistroRoteiro } from '../src/db/sinistros';
 import { mostrarAlerta } from '../src/utils/alerta';
 import { montarUrlGoogleMaps, type Coordenada } from '../src/utils/rota';
+import { MapaRoteiro, type PontoRoteiro } from '../src/components/MapaRoteiro';
 
-const ALTURA_ITEM = 82;
+/** A lista arrastável exige altura fixa por item — dimensionada pra caber 3 linhas de endereço. */
+const ALTURA_ITEM = 118;
 
 function enderecoCompleto(item: SinistroRoteiro): string {
   const partes = [
     [item.endereco, item.nro_predio].filter(Boolean).join(', '),
     item.bairro,
-    item.nm_cidade && item.id_estado ? `${item.nm_cidade} - ${item.id_estado}` : item.nm_cidade,
     item.cep,
+    item.nm_cidade && item.id_estado ? `${item.nm_cidade} - ${item.id_estado}` : item.nm_cidade,
   ];
   return partes.filter((p) => p && p.trim()).join(', ');
 }
@@ -33,6 +35,10 @@ export default function RoteirosScreen() {
   const [processos, setProcessos] = useState<SinistroRoteiro[]>([]);
   const [idsSelecionados, setIdsSelecionados] = useState<number[]>([]);
   const [montando, setMontando] = useState(false);
+  /** Cache de geocodificação por sinistro: null = endereço não localizado (não tenta de novo). */
+  const [coordenadas, setCoordenadas] = useState<Record<number, Coordenada | null>>({});
+  /** Só fica preenchida depois que o usuário monta um roteiro e concede a permissão. */
+  const [origem, setOrigem] = useState<Coordenada | null>(null);
 
   useEffect(() => {
     if (!codregNum) return;
@@ -67,6 +73,55 @@ export default function RoteirosScreen() {
     [processos, idsSelecionados],
   );
 
+  // Geocodifica um endereço por vez: grava no cache e deixa o próprio efeito reexecutar (ele
+  // depende de `coordenadas`) pra pegar o próximo pendente. O resultado é guardado mesmo quando
+  // falha (null), então reordenar, remover ou reselecionar nunca refaz a busca.
+  useEffect(() => {
+    let cancelado = false;
+
+    async function geocodificarProximo() {
+      const pendente = selecionados.find((p) => !(p.id_sinistro in coordenadas));
+      if (!pendente) return;
+
+      const endereco = enderecoCompleto(pendente);
+      let coord: Coordenada | null = null;
+      if (endereco) {
+        try {
+          const resultados = await Location.geocodeAsync(endereco);
+          if (resultados.length > 0) {
+            coord = { latitude: resultados[0].latitude, longitude: resultados[0].longitude };
+          }
+        } catch {
+          coord = null;
+        }
+      }
+      if (cancelado) return;
+      setCoordenadas((atual) => ({ ...atual, [pendente.id_sinistro]: coord }));
+    }
+
+    geocodificarProximo();
+    return () => {
+      cancelado = true;
+    };
+  }, [selecionados, coordenadas]);
+
+  /** Paradas que já têm coordenada, numeradas na ordem da trajetória. */
+  const pontosMapa = useMemo<PontoRoteiro[]>(() => {
+    const pontos: PontoRoteiro[] = [];
+    selecionados.forEach((item, indice) => {
+      const coord = coordenadas[item.id_sinistro];
+      if (!coord) return;
+      pontos.push({
+        ...coord,
+        ordem: indice + 1,
+        rotulo: item.nm_segurado || item.nro_sinistro || `Sinistro ${item.id_sinistro}`,
+      });
+    });
+    return pontos;
+  }, [selecionados, coordenadas]);
+
+  const localizando = selecionados.some((p) => !(p.id_sinistro in coordenadas));
+
   const listaRef = useRef<FlatList<SinistroRoteiro>>(null);
 
   const sortable = useSortableList({
@@ -94,35 +149,28 @@ export default function RoteirosScreen() {
     try {
       const permissao = await Location.requestForegroundPermissionsAsync();
 
-      let origem: Coordenada | null = null;
+      let origemAtual: Coordenada | null = null;
       if (permissao.granted) {
         try {
           const posicao = await Location.getCurrentPositionAsync({});
-          origem = { latitude: posicao.coords.latitude, longitude: posicao.coords.longitude };
+          origemAtual = { latitude: posicao.coords.latitude, longitude: posicao.coords.longitude };
+          setOrigem(origemAtual);
         } catch {
-          origem = null;
+          origemAtual = null;
         }
       }
 
       const pontos: Coordenada[] = [];
       const falhas: string[] = [];
 
-      // Respeita a ordem em que os processos foram arrastados/selecionados — sem reordenar por distância.
+      // Respeita a ordem em que os processos foram arrastados/selecionados — sem reordenar por
+      // distância. As coordenadas já foram resolvidas ao selecionar (cache), então aqui é só ler.
       for (const item of selecionados) {
-        const endereco = enderecoCompleto(item);
-        if (!endereco) {
-          falhas.push(item.nm_segurado || item.nro_sinistro || `Sinistro ${item.id_sinistro}`);
-          continue;
-        }
-        try {
-          const resultados = await Location.geocodeAsync(endereco);
-          if (resultados.length === 0) {
-            falhas.push(item.nm_segurado || item.nro_sinistro || endereco);
-            continue;
-          }
-          pontos.push({ latitude: resultados[0].latitude, longitude: resultados[0].longitude });
-        } catch {
-          falhas.push(item.nm_segurado || item.nro_sinistro || endereco);
+        const coord = coordenadas[item.id_sinistro];
+        if (coord) {
+          pontos.push(coord);
+        } else {
+          falhas.push(item.nm_segurado || item.nro_sinistro || enderecoCompleto(item) || `Sinistro ${item.id_sinistro}`);
         }
       }
 
@@ -130,7 +178,7 @@ export default function RoteirosScreen() {
         mostrarAlerta('Endereço não localizado', 'Não foi possível localizar nenhum dos endereços selecionados.');
         return;
       }
-      if (!origem && pontos.length < 2) {
+      if (!origemAtual && pontos.length < 2) {
         mostrarAlerta(
           'Localização necessária',
           'Sem acesso à localização atual, selecione ao menos 2 processos para montar o roteiro.',
@@ -138,7 +186,7 @@ export default function RoteirosScreen() {
         return;
       }
 
-      const url = montarUrlGoogleMaps(origem, pontos);
+      const url = montarUrlGoogleMaps(origemAtual, pontos);
 
       if (falhas.length > 0) {
         mostrarAlerta('Alguns endereços não foram localizados', falhas.join(', '), [
@@ -192,6 +240,12 @@ export default function RoteirosScreen() {
               contentContainerStyle={styles.lista}
               ListHeaderComponent={
                 <>
+                  {selecionados.length > 0 && (
+                    <>
+                      <MapaRoteiro pontos={pontosMapa} origem={origem} />
+                      {localizando && <Text style={styles.dicaArrastar}>Localizando endereços…</Text>}
+                    </>
+                  )}
                   <Text style={styles.tituloSecao}>Selecionados</Text>
                   {selecionados.length === 0 && (
                     <Text style={styles.mensagemVazia}>Selecione os processos na lista abaixo para montar o roteiro.</Text>
@@ -213,7 +267,7 @@ export default function RoteirosScreen() {
                       <Text style={styles.cardLinha} numberOfLines={1}>
                         Sinistro <Text style={styles.cardDestaque}>{item.nro_sinistro}</Text>
                       </Text>
-                      <Text style={styles.cardLinha} numberOfLines={1}>
+                      <Text style={styles.cardEndereco} numberOfLines={3}>
                         {enderecoCompleto(item) || 'Endereço não informado'}
                       </Text>
                     </View>
@@ -233,7 +287,7 @@ export default function RoteirosScreen() {
                         <Text style={styles.cardLinha} numberOfLines={1}>
                           Sinistro <Text style={styles.cardDestaque}>{item.nro_sinistro}</Text>
                         </Text>
-                        <Text style={styles.cardLinha} numberOfLines={1}>
+                        <Text style={styles.cardEndereco}>
                           {enderecoCompleto(item) || 'Endereço não informado'}
                         </Text>
                       </View>
@@ -352,12 +406,15 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     borderWidth: 1,
     borderColor: '#e3e8ed',
-    height: ALTURA_ITEM - 8,
+    // Sem altura fixa: os disponíveis crescem pra mostrar o endereço inteiro.
+    minHeight: ALTURA_ITEM - 8,
   },
   cardSelecionado: {
     borderColor: '#1c3d5a',
     backgroundColor: '#eef4f8',
     marginBottom: 0,
+    // A lista arrastável mede cada item por ALTURA_ITEM, então aqui a altura é fixa mesmo.
+    height: ALTURA_ITEM - 8,
   },
   numeroOrdem: {
     fontSize: 13,
@@ -378,6 +435,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#48545e',
     marginTop: 2,
+  },
+  cardEndereco: {
+    fontSize: 12,
+    color: '#48545e',
+    marginTop: 2,
+    lineHeight: 16,
   },
   cardDestaque: {
     color: '#2a88ad',

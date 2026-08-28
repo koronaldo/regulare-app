@@ -8,7 +8,8 @@ export interface OpcaoSelecao {
 }
 
 interface SelecaoProps {
-  label: string;
+  /** Omitido quando o rótulo já vem do título da seção — evita repetir o mesmo texto. */
+  label?: string;
   valor: string | number | null | undefined;
   opcoes: OpcaoSelecao[];
   onChange: (valor: string) => void;
@@ -23,10 +24,12 @@ export const Selecao = forwardRef<View, SelecaoProps>(function Selecao(
 ) {
   return (
     <View style={styles.container} ref={ref}>
-      <Text style={styles.label}>
-        {label}
-        {obrigatorio && <Text style={styles.asterisco}> *</Text>}
-      </Text>
+      {label ? (
+        <Text style={styles.label}>
+          {label}
+          {obrigatorio && <Text style={styles.asterisco}> *</Text>}
+        </Text>
+      ) : null}
       <View style={[styles.pickerBorda, erro && styles.pickerBordaErro]}>
         <Picker selectedValue={valor != null ? String(valor) : ''} onValueChange={(v) => onChange(String(v))}>
           <Picker.Item label={placeholder} value="" />

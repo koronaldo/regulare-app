@@ -23,11 +23,12 @@ import { Interruptor } from '../../../src/components/form/Interruptor';
 import { Secao } from '../../../src/components/form/Secao';
 import { Selecao, type OpcaoSelecao } from '../../../src/components/form/Selecao';
 import {
+  buscarContextoApolice,
   buscarDadosBasicosMaquina,
   buscarDadosEnderecoSinistro,
   buscarItensApolice,
   buscarRespostasMaquina,
-  buscarTipoApolice,
+  itensApoliceDoContexto,
   criarMaquina,
   excluirBenfeitoria,
   excluirMaquina,
@@ -44,6 +45,7 @@ import {
   salvarItensApolice,
   salvarMaquina,
   type Benfeitoria,
+  type ContextoApolice,
   type DadosBasicosMaquina,
   type DadosBenfeitoria,
   type DadosEnderecoSinistro,
@@ -58,6 +60,7 @@ import { buscarSinistroPorId, listarCidadesPorEstado, listarEstados } from '../.
 import { informacoesCompletas } from '../../../src/db/transferencia';
 import { mostrarAlerta } from '../../../src/utils/alerta';
 import { paraCoordenadasGrau } from '../../../src/utils/coordenadas';
+import { formatarDecimal, formatarDecimalDigitado } from '../../../src/utils/numero';
 
 interface ValorItemApolice {
   descricao: string;
@@ -88,40 +91,99 @@ function usaCidade(item: ItemApolice) {
 }
 
 /**
- * Valor padrão sugerido pra itens de endereço, a partir do que já foi preenchido no
- * Cadastro Geral — só usado enquanto o item não tiver resposta salva em sinistro_apolice.
+ * O "N" de descricaoN no legado é o id_item, NÃO o ordem_item: no banco real o item "Item da
+ * apólice" tem id_item=12 (o descricao12 do legado) e ordem_item=1, ou seja, ordem_item define só
+ * a posição de exibição na tela. Indexar o mapa por ordem_item deslocava todos os campos em uma
+ * posição.
  */
-function descricaoPadrao(descricaoItem: string, endereco: DadosEnderecoSinistro | null): string {
-  if (!endereco) return '';
-  const texto = descricaoItem.toLowerCase();
-  if (texto.includes('bairro')) return endereco.bairro ?? '';
-  if (texto.includes('logradouro')) return endereco.endereco ?? '';
-  if (texto.includes('cep')) return endereco.cep ?? '';
-  if (texto.includes('prédio') || texto.includes('predio')) return endereco.nro_predio ?? '';
-  if (texto.includes('ocupação') || texto.includes('ocupacao')) return endereco.ocupacao ?? '';
-  if (texto.includes('construção') || texto.includes('construcao')) return endereco.construcao ?? '';
-  return '';
+function posicaoItem(item: ItemApolice): number {
+  return item.id_item;
 }
 
-function valorInicialItem(item: ItemApolice, endereco: DadosEnderecoSinistro | null): ValorItemApolice {
-  const descricaoSalva = item.descricao;
-  const usaCid = usaCidade(item);
+type CampoEnderecoTexto = 'ocupacao' | 'construcao' | 'bairro' | 'endereco' | 'nro_predio' | 'nro_unidade' | 'cep';
+
+/**
+ * Pré-preenchimento do questionário de endereço — porta de CarregaInformacoesNovas
+ * (cadinformacoes_def.js), que atende tanto a opção "Prédio" (PRE) quanto a opção
+ * "Máquina + local determinado": as duas usam exatamente este mesmo mapa.
+ *
+ * O legado grava $_POST['descricaoN'] pelo apolice_item.id_item, nunca pelo texto da descrição
+ * nem pelo ordem_item (que é só a ordem de exibição) — por isso o mapa é por número.
+ *
+ * Fora do mapa, de propósito:
+ *  - id_item 3 (Cidade/UF, o id_estado_ori3/id_cidade_ori3 do legado) — tratado em valorInicialItem;
+ *  - id_item 12 (Item da apólice) — tratado em valorInicialItem: quando a apólice é de item
+ *    único vem com o texto fixo TEXTO_ITEM_UNICO; senão fica em branco, já que o
+ *    nro_item_apolice do legado não vem no payload do autentica_criptoX40.php.
+ */
+const CAMPO_ENDERECO_POR_POSICAO: Record<number, CampoEnderecoTexto> = {
+  1: 'ocupacao',
+  2: 'construcao',
+  4: 'bairro',
+  5: 'endereco',
+  6: 'nro_predio',
+  7: 'nro_unidade',
+  8: 'cep',
+};
+
+/** id_item do item Cidade/UF no questionário de endereço (o "3" de id_estado_ori3). */
+const POSICAO_CIDADE = 3;
+
+/** id_item do "Item da apólice" (o descricao12 do legado). */
+const POSICAO_ITEM_APOLICE = 12;
+
+/** Valor fixo do item 12 quando o cadastro do sinistro marca a apólice como de item único. */
+const TEXTO_ITEM_UNICO = 'Item único';
+
+function descricaoPadrao(posicao: number, endereco: DadosEnderecoSinistro | null): string {
+  if (!endereco) return '';
+  const campo = CAMPO_ENDERECO_POR_POSICAO[posicao];
+  return campo ? (endereco[campo] ?? '') : '';
+}
+
+function valorInicialItem(
+  item: ItemApolice,
+  posicao: number,
+  endereco: DadosEnderecoSinistro | null,
+): ValorItemApolice {
+  // Resposta já salva em sinistro_apolice sempre vence o pré-preenchimento do Cadastro Geral.
+  const ehCidade = posicao === POSICAO_CIDADE && usaCidade(item);
+  // Item de lista fixa não recebe sugestão de texto (o valor tem que sair da lista).
+  const aceitaSugestao = !item.lista_selecao && !usaCidade(item);
+  const ehItemUnico = posicao === POSICAO_ITEM_APOLICE && !!endereco?.item_unico;
 
   return {
     descricao:
-      descricaoSalva || item.lista_selecao ? descricaoSalva : usaCid ? '' : descricaoPadrao(item.descricao_item, endereco),
+      item.descricao ||
+      (ehItemUnico ? TEXTO_ITEM_UNICO : aceitaSugestao ? descricaoPadrao(posicao, endereco) : ''),
     confere: item.confere,
     complemento: item.complemento,
-    id_estado: item.id_estado ?? (usaCid ? (endereco?.id_estado ?? '') : ''),
+    id_estado: item.id_estado ?? (ehCidade ? (endereco?.id_estado ?? '') : ''),
     id_cidade:
       item.id_cidade != null
         ? String(item.id_cidade)
-        : usaCid && endereco?.id_estado && endereco.id_cidade != null
+        : ehCidade && endereco?.id_estado && endereco.id_cidade != null
           ? String(endereco.id_cidade)
           : '',
     id_estado_ori: item.id_estado_ori ?? '',
     id_cidade_ori: item.id_cidade_ori != null ? String(item.id_cidade_ori) : '',
   };
+}
+
+const CONTEXTO_VAZIO: ContextoApolice = {
+  tipo_apolice: null,
+  territorio_nacional: false,
+  local_determinado: false,
+};
+
+/**
+ * Se este sinistro responde o questionário de endereço (apolice_item): opção 1 do legado
+ * (Predial) e opção 3 (Máquina + local determinado). A opção 2 (Máquina + território nacional)
+ * não tem endereço fixo — responde só o checklist por máquina (maquina_item).
+ * Máquina com local determinado mostra os dois: o endereço do risco e as máquinas nele.
+ */
+function usaChecklistEndereco(ctx: ContextoApolice): boolean {
+  return ctx.tipo_apolice === 'PRE' || (ctx.tipo_apolice === 'MAQ' && ctx.local_determinado);
 }
 
 const RESPOSTA_MAQUINA_VAZIA: RespostaCampoMaquina = { descricao: '', confere: null, complemento: '' };
@@ -136,33 +198,47 @@ const DADOS_MAQUINA_VAZIO: DadosBasicosMaquina = {
   chassi: '',
   placa: '',
   total_km: '',
+  obs_benfe: '',
   construcao: '',
 };
 
 /**
- * Cada campo do checklist de máquina corresponde a uma coluna de sinibenfe — usado tanto pra
- * sugerir o valor padrão (máquina importada) quanto pra gravar de volta ao salvar, já que o
- * checklist é o único lugar onde esses dados são editados (sem formulário duplicado por cima).
+ * Pré-preenchimento do checklist de máquina — porta de MontaEstruturaMaquina1
+ * (cadinformacoes_def.js), opção "Máquina + território nacional". As 10 primeiras posições de
+ * maquina_item (indexadas por id_item, que no banco real vai de 1 a 14 sem buracos) são as
+ * colunas de sinibenfe da máquina — é só nelas que o legado grava
+ * $_POST["descricaoN_$maquina"]. Cada uma é também o único lugar onde esses dados são editados,
+ * então o mesmo mapa serve pra gravar de volta em sinibenfe ao salvar.
  */
-function chaveDadoBasicoMaquina(descricaoItem: string): keyof DadosBasicosMaquina | null {
-  const texto = descricaoItem.toLowerCase();
-  if (texto.includes('operador') || texto.includes('contratante')) return null;
-  if (texto.includes('item')) return 'item_apolice';
-  if (texto.includes('nome') || texto.includes('maq') || texto.includes('equip')) return 'nm_benfeito';
-  if (texto.includes('marca')) return 'marca';
-  if (texto.includes('modelo')) return 'modelo';
-  if (texto.includes('ano')) return 'ano';
-  if (texto.includes('série') || texto.includes('serie')) return 'nro_serie';
-  if (texto.includes('chassi')) return 'chassi';
-  if (texto.includes('placa')) return 'placa';
-  if (texto.includes('km')) return 'total_km';
-  if (texto.includes('construção') || texto.includes('construcao')) return 'construcao';
-  return null;
+const CAMPO_MAQUINA_POR_POSICAO: Record<number, keyof DadosBasicosMaquina> = {
+  1: 'item_apolice',
+  2: 'nm_benfeito',
+  3: 'marca',
+  4: 'modelo',
+  5: 'ano',
+  6: 'nro_serie',
+  7: 'chassi',
+  8: 'placa',
+  9: 'total_km',
+  10: 'obs_benfe',
+};
+
+/** O `$item<11` do legado: acima disso o item não tem valor próprio, só complemento. */
+const ULTIMA_POSICAO_DADO_MAQUINA = 10;
+
+function colunaMaquina(posicao: number): keyof DadosBasicosMaquina | null {
+  if (posicao > ULTIMA_POSICAO_DADO_MAQUINA) return null;
+  return CAMPO_MAQUINA_POR_POSICAO[posicao] ?? null;
 }
 
-function valorPadraoMaquina(descricaoItem: string, dados: DadosBasicosMaquina): string {
-  const chave = chaveDadoBasicoMaquina(descricaoItem);
-  return chave ? dados[chave] : '';
+/**
+ * Porta do `if((referencia=='N'||referencia=='A') && $item<11)`: só item de texto (N) ou
+ * texto+lista (A) recebe o valor vindo da máquina — L/S são listas puras e ficam sem sugestão.
+ */
+function valorPadraoMaquina(item: MaquinaItem, posicao: number, dados: DadosBasicosMaquina): string {
+  if (item.referencia !== 'N' && item.referencia !== 'A') return '';
+  const coluna = colunaMaquina(posicao);
+  return coluna ? dados[coluna] : '';
 }
 
 interface FormBenfeitoria {
@@ -204,8 +280,8 @@ function formInicialBenfeitoria(b: Benfeitoria): FormBenfeitoria {
     id_sinibenfe: b.id_sinibenfe,
     nm_benfeito: b.nm_benfeito,
     id_ocupacao: b.id_ocupacao != null ? String(b.id_ocupacao) : '',
-    area: b.area,
-    idade: b.idade,
+    area: formatarDecimal(b.area),
+    idade: formatarDecimal(b.idade),
     danos: b.danos,
     id_estrutura: b.id_estrutura != null ? String(b.id_estrutura) : '',
     id_parede: b.id_parede != null ? String(b.id_parede) : '',
@@ -225,7 +301,7 @@ export default function InformacoesScreen() {
 
   const [carregando, setCarregando] = useState(true);
   const [cabecalho, setCabecalho] = useState({ segurado: '', sinistro: '' });
-  const [tipoApolice, setTipoApolice] = useState<string | null>(null);
+  const [contexto, setContexto] = useState<ContextoApolice>(CONTEXTO_VAZIO);
 
   const [itens, setItens] = useState<ItemApolice[]>([]);
   const [valores, setValores] = useState<Record<number, ValorItemApolice>>({});
@@ -310,10 +386,10 @@ export default function InformacoesScreen() {
       async function carregar() {
         setCarregando(true);
         try {
-          const [sinistro, tipo, listaEstados, listaBenfeitorias, ocupacao, estrutura, parede, tipoCobertura, esquadria, cobertura] =
+          const [sinistro, ctx, listaEstados, listaBenfeitorias, ocupacao, estrutura, parede, tipoCobertura, esquadria, cobertura] =
             await Promise.all([
               buscarSinistroPorId(idSinistro),
-              buscarTipoApolice(idSinistro),
+              buscarContextoApolice(idSinistro),
               listarEstados(),
               listarBenfeitorias(idSinistro),
               listarOpcoesOcupacao(),
@@ -326,7 +402,7 @@ export default function InformacoesScreen() {
           if (cancelado) return;
 
           if (sinistro) setCabecalho({ segurado: sinistro.nm_segurado ?? '', sinistro: sinistro.nro_sinistro ?? '' });
-          setTipoApolice(tipo);
+          setContexto(ctx);
           setEstados(listaEstados);
           setBenfeitorias(listaBenfeitorias);
           setOpcoesOcupacao(ocupacao);
@@ -337,14 +413,18 @@ export default function InformacoesScreen() {
           setOpcoesCobertura(cobertura);
           setFormBenfeitoria(null);
 
-          if (tipo === 'PRE') {
-            const [listaItens, endereco] = await Promise.all([
+          if (usaChecklistEndereco(ctx)) {
+            const [todosItens, endereco] = await Promise.all([
               buscarItensApolice(idSinistro),
               buscarDadosEnderecoSinistro(idSinistro),
             ]);
             if (cancelado) return;
+            // Máquina em local determinado responde só os itens de localização (3 a 8).
+            const listaItens = itensApoliceDoContexto(ctx, todosItens);
             setItens(listaItens);
-            const valoresIniciais = Object.fromEntries(listaItens.map((i) => [i.id_item, valorInicialItem(i, endereco)]));
+            const valoresIniciais = Object.fromEntries(
+              listaItens.map((i) => [i.id_item, valorInicialItem(i, posicaoItem(i), endereco)]),
+            );
             setValores(valoresIniciais);
 
             const cidadesRefCarregadas: Record<number, OpcaoSelecao[]> = {};
@@ -357,18 +437,19 @@ export default function InformacoesScreen() {
             if (cancelado) return;
             setCidadesRef(cidadesRefCarregadas);
             setCidadesOri(cidadesOriCarregadas);
-            setMaquinas([]);
-            setMaquinaItens([]);
           } else {
             setItens([]);
             setValores({});
           }
 
-          if (tipo === 'MAQ') {
+          if (ctx.tipo_apolice === 'MAQ') {
             const [listaMaquinas, listaMaquinaItens] = await Promise.all([listarMaquinas(idSinistro), listarMaquinaItens()]);
             if (cancelado) return;
             setMaquinas(listaMaquinas);
             setMaquinaItens(listaMaquinaItens);
+          } else {
+            setMaquinas([]);
+            setMaquinaItens([]);
           }
           setMaquinaSelecionada(null);
         } finally {
@@ -392,26 +473,19 @@ export default function InformacoesScreen() {
     for (const item of itens) {
       const valor = valores[item.id_item] ?? VALOR_ITEM_VAZIO;
 
-      if (item.conferencia) {
-        if (valor.confere == null) return { idItem: item.id_item, mensagem: 'Marque se confere (Sim ou Não)' };
-        if (valor.confere === false) {
-          if (usaTextoLivre(item) && !valor.complemento.trim()) {
-            return { idItem: item.id_item, mensagem: 'Informe o que foi encontrado' };
-          }
-          if (usaCidade(item) && !valor.id_cidade_ori) {
-            return { idItem: item.id_item, mensagem: 'Informe a cidade encontrada' };
-          }
-        }
-        continue;
-      }
+      // Item sem conferencia (ex.: Propriedade, Proprietário, Tempo de instalação) é informativo:
+      // não mostra "Confere?" e não é obrigatório. Só os itens conferíveis exigem resposta.
+      if (!item.conferencia) continue;
 
-      // Sem opção Sim/Não pra esse item: o campo de valor em si vira obrigatório.
-      const temLista = !!item.lista_selecao;
-      if (temLista && !valor.descricao) return { idItem: item.id_item, mensagem: 'Selecione um valor' };
-      if (!temLista && usaTextoLivre(item) && !valor.descricao.trim()) {
-        return { idItem: item.id_item, mensagem: 'Preencha o valor' };
+      if (valor.confere == null) return { idItem: item.id_item, mensagem: 'Marque se confere (Sim ou Não)' };
+      if (valor.confere === false) {
+        if (usaTextoLivre(item) && !valor.complemento.trim()) {
+          return { idItem: item.id_item, mensagem: 'Informe o que foi encontrado' };
+        }
+        if (usaCidade(item) && !valor.id_cidade_ori) {
+          return { idItem: item.id_item, mensagem: 'Informe a cidade encontrada' };
+        }
       }
-      if (usaCidade(item) && !valor.id_cidade) return { idItem: item.id_item, mensagem: 'Selecione a cidade' };
     }
     return null;
   }
@@ -616,12 +690,19 @@ export default function InformacoesScreen() {
   async function salvarMaquinaAtual() {
     if (!maquinaSelecionada) return;
 
-    const dadosBasicos: DadosBasicosMaquina = { ...DADOS_MAQUINA_VAZIO };
+    // Parte do que já está gravado, não do vazio: colunas de sinibenfe que nenhum item do
+    // checklist edita (ex.: construcao) seriam apagadas se o mapa começasse em branco.
+    const dadosBasicos: DadosBasicosMaquina = { ...dadosMaquina };
     const respostas: RespostaMaquina[] = maquinaItens.map((item) => {
+      const posicao = item.id_item;
       const resposta = respostasMaquina[item.id_item];
-      const valorAtual = resposta?.descricao || valorPadraoMaquina(item.descricao_item, dadosMaquina);
-      const chave = chaveDadoBasicoMaquina(item.descricao_item);
-      if (chave) dadosBasicos[chave] = valorAtual;
+      // Acima da posição 10 o item não tem valor próprio — a resposta é só o complemento.
+      const valorAtual =
+        posicao > ULTIMA_POSICAO_DADO_MAQUINA
+          ? ''
+          : resposta?.descricao || valorPadraoMaquina(item, posicao, dadosMaquina);
+      const coluna = colunaMaquina(posicao);
+      if (coluna) dadosBasicos[coluna] = valorAtual;
 
       return {
         id_item: item.id_item,
@@ -699,9 +780,11 @@ export default function InformacoesScreen() {
     router.replace({ pathname: '/sinistro/[id]/coberturas', params: { id: String(idSinistro) } });
   }
 
-  // Checklist de conferência (Cidade/UF, Bairro, Logradouro, etc.) vale tanto pra apólice
-  // Predial quanto Máquina — só não se aplica a outros tipos.
-  const checklistDisponivel = tipoApolice === 'PRE' || tipoApolice === 'MAQ';
+  // Questionário de endereço (Ocupação, Construção, Cidade/UF, Bairro, Logradouro...): Predial
+  // sempre; Máquina só quando o risco é um local determinado. Máquina em território nacional
+  // responde o checklist por máquina, não o de endereço.
+  const checklistDisponivel = usaChecklistEndereco(contexto);
+  const mostraMaquinas = contexto.tipo_apolice === 'MAQ';
 
   if (carregando) {
     return (
@@ -744,12 +827,15 @@ export default function InformacoesScreen() {
 
       <KeyboardAvoidingView style={styles.flex1} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <ScrollView ref={scrollRef} contentContainerStyle={styles.conteudo} keyboardShouldPersistTaps="handled">
-        <Text style={styles.tituloSecao}>INFORMAÇÕES</Text>
+        {checklistDisponivel && <Text style={styles.tituloSecao}>INFORMAÇÕES</Text>}
 
-        {!checklistDisponivel && (
-          <Text style={styles.vazioTexto}>
-            Checklist de informações disponível apenas para apólices do tipo Predial ou Máquina nesta etapa.
-          </Text>
+        {!checklistDisponivel && !mostraMaquinas && (
+          <>
+            <Text style={styles.tituloSecao}>INFORMAÇÕES</Text>
+            <Text style={styles.vazioTexto}>
+              Checklist de informações disponível apenas para apólices do tipo Predial ou Máquina nesta etapa.
+            </Text>
+          </>
         )}
 
         {checklistDisponivel && itens.length === 0 && (
@@ -773,20 +859,16 @@ export default function InformacoesScreen() {
                 <Secao titulo={item.descricao_item}>
                   {opcoesLista.length > 0 && (
                     <Selecao
-                      label="Valor"
                       valor={valor.descricao}
                       opcoes={opcoesLista}
                       onChange={(v) => atualizarValorItem(item.id_item, { descricao: v })}
-                      obrigatorio={!item.conferencia}
                       erro={erroDesteItem}
                     />
                   )}
                   {opcoesLista.length === 0 && usaTextoLivre(item) && (
                     <Campo
-                      label="Valor"
                       value={valor.descricao}
                       onChangeText={(v) => atualizarValorItem(item.id_item, { descricao: v })}
-                      obrigatorio={!item.conferencia}
                       erro={erroDesteItem}
                     />
                   )}
@@ -803,8 +885,7 @@ export default function InformacoesScreen() {
                         valor={valor.id_cidade}
                         opcoes={cidadesRef[item.id_item] ?? []}
                         onChange={(v) => atualizarValorItem(item.id_item, { id_cidade: v })}
-                        obrigatorio={!item.conferencia}
-                        erro={erroDesteItem}
+                          erro={erroDesteItem}
                       />
                     </>
                   )}
@@ -923,14 +1004,16 @@ export default function InformacoesScreen() {
             <Campo
               label="Área"
               value={formBenfeitoria.area}
-              onChangeText={(v) => atualizarFormBenfeitoria('area', v)}
+              onChangeText={(v) => atualizarFormBenfeitoria('area', formatarDecimalDigitado(v))}
               keyboardType="numeric"
+              placeholder="0,00"
             />
             <Campo
               label="Idade"
               value={formBenfeitoria.idade}
-              onChangeText={(v) => atualizarFormBenfeitoria('idade', v)}
+              onChangeText={(v) => atualizarFormBenfeitoria('idade', formatarDecimalDigitado(v))}
               keyboardType="numeric"
+              placeholder="0,00"
             />
             <Interruptor label="Danos?" valor={formBenfeitoria.danos} onChange={(v) => atualizarFormBenfeitoria('danos', v)} />
             <Selecao
@@ -1036,7 +1119,7 @@ export default function InformacoesScreen() {
           </Pressable>
         ))}
 
-        {tipoApolice === 'MAQ' && (
+        {mostraMaquinas && (
           <>
             <Text style={[styles.tituloSecao, styles.tituloSecaoEspacada]}>MÁQUINAS</Text>
 
@@ -1072,8 +1155,8 @@ export default function InformacoesScreen() {
                 return (
                   <Secao titulo={maquina.importada ? 'Conferir Máquina' : 'Nova Máquina'}>
                     {maquinaItens.map((item) => {
+                      const posicao = item.id_item;
                       const resposta = respostasMaquina[item.id_item];
-                      const valorAtual = resposta?.descricao || valorPadraoMaquina(item.descricao_item, dadosMaquina);
                       const opcoesLista: OpcaoSelecao[] = item.lista_selecao
                         ? item.lista_selecao
                             .split(';')
@@ -1081,20 +1164,49 @@ export default function InformacoesScreen() {
                             .map((v) => ({ valor: v, label: v }))
                         : [];
 
+                      // Porta do `if($item>10)`: da posição 11 em diante o item não tem valor
+                      // próprio — a resposta é o complemento, texto livre de 40 quando
+                      // referencia='A' e lista fixa quando 'L'/'S' (referencia='N' só confere).
+                      const soComplemento = posicao > ULTIMA_POSICAO_DADO_MAQUINA;
+                      const complementoTextoLivre = soComplemento && item.referencia === 'A';
+                      const complementoLista = soComplemento && (item.referencia === 'L' || item.referencia === 'S');
+                      const valorAtual = soComplemento
+                        ? ''
+                        : resposta?.descricao || valorPadraoMaquina(item, posicao, dadosMaquina);
+
                       return (
                         <View key={item.id_item} style={styles.campoMaquina}>
-                          {opcoesLista.length > 0 ? (
-                            <Selecao
-                              label={item.descricao_item}
-                              valor={valorAtual}
-                              opcoes={opcoesLista}
-                              onChange={(v) => atualizarRespostaMaquina(item.id_item, { descricao: v })}
-                            />
-                          ) : (
+                          {!soComplemento &&
+                            (opcoesLista.length > 0 ? (
+                              <Selecao
+                                label={item.descricao_item}
+                                valor={valorAtual}
+                                opcoes={opcoesLista}
+                                onChange={(v) => atualizarRespostaMaquina(item.id_item, { descricao: v })}
+                              />
+                            ) : (
+                              <Campo
+                                label={item.descricao_item}
+                                value={valorAtual}
+                                onChangeText={(v) => atualizarRespostaMaquina(item.id_item, { descricao: v })}
+                              />
+                            ))}
+
+                          {complementoTextoLivre && (
                             <Campo
                               label={item.descricao_item}
-                              value={valorAtual}
-                              onChangeText={(v) => atualizarRespostaMaquina(item.id_item, { descricao: v })}
+                              value={resposta?.complemento ?? ''}
+                              maxLength={40}
+                              onChangeText={(v) => atualizarRespostaMaquina(item.id_item, { complemento: v })}
+                            />
+                          )}
+
+                          {complementoLista && (
+                            <Selecao
+                              label={item.descricao_item}
+                              valor={resposta?.complemento ?? ''}
+                              opcoes={opcoesLista}
+                              onChange={(v) => atualizarRespostaMaquina(item.id_item, { complemento: v })}
                             />
                           )}
 
@@ -1125,7 +1237,9 @@ export default function InformacoesScreen() {
                                   <Text style={styles.opcaoConfereTexto}>Não</Text>
                                 </Pressable>
                               </View>
-                              {resposta?.confere === false && (
+                              {/* Nos itens acima da posição 10 o complemento já É a resposta,
+                                  renderizada acima — não vira "o que foi encontrado". */}
+                              {resposta?.confere === false && !soComplemento && (
                                 <Campo
                                   label="O que foi encontrado"
                                   value={resposta?.complemento ?? ''}

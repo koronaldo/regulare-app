@@ -81,7 +81,8 @@ export default function AssinarAtaScreen() {
       const destino = new File(dir, `${idModataNum}_${Date.now()}.pdf`);
       await new File(uri).copy(destino);
 
-      await inserirArquivo(idSinistro, idDocumento, destino.uri);
+      // O nome exibido na relação de documentos é o mesmo da tela de Atas e Termos.
+      await inserirArquivo(idSinistro, idDocumento, destino.uri, nome ?? '');
       await salvarAssinaturaAta(idSinistro, idDocumento, assinaturaBase64);
 
       mostrarAlerta('Ata assinada', 'A ata foi assinada e inserida na relação de documentos.', [

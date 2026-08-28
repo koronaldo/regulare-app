@@ -2,7 +2,8 @@ import { forwardRef } from 'react';
 import { StyleSheet, Text, TextInput, type TextInputProps, View } from 'react-native';
 
 interface CampoProps extends TextInputProps {
-  label: string;
+  /** Omitido quando o rótulo já vem do título da seção — evita repetir o mesmo texto. */
+  label?: string;
   obrigatorio?: boolean;
   erro?: string;
 }
@@ -13,10 +14,12 @@ export const Campo = forwardRef<TextInput, CampoProps>(function Campo(
 ) {
   return (
     <View style={styles.container}>
-      <Text style={styles.label}>
-        {label}
-        {obrigatorio && <Text style={styles.asterisco}> *</Text>}
-      </Text>
+      {label ? (
+        <Text style={styles.label}>
+          {label}
+          {obrigatorio && <Text style={styles.asterisco}> *</Text>}
+        </Text>
+      ) : null}
       <TextInput
         ref={ref}
         style={[styles.input, erro && styles.inputErro, style]}

@@ -1,4 +1,5 @@
 import { getDb } from './client';
+import { buscarContextoApolice, ITENS_APOLICE_MAQUINA_LOCAL } from './informacoes';
 
 export interface ItemTransferencia {
   id_tipotrans: number;
@@ -58,13 +59,36 @@ const ID_TIPOTRANS_RECIBOS = 15;
 /**
  * Porta de SituacaoInformacoes (transfere_sinistro_def_screen.js): compara quantos itens da
  * apólice existem contra quantos já foram conferidos neste sinistro (sinistro_apolice).
+ *
+ * Máquina em território nacional é a exceção: esse sinistro não responde o questionário de
+ * endereço (apolice_item) — o checklist dele é por máquina, em sinistro_maquina. Cobrar
+ * sinistro_apolice nesse caso travava o "Próximo"/transferência pra sempre.
  */
 export async function informacoesCompletas(idSinistro: number): Promise<boolean> {
   const db = await getDb();
+  const { tipo_apolice, local_determinado } = await buscarContextoApolice(idSinistro);
+
+  if (tipo_apolice === 'MAQ' && !local_determinado) {
+    const row = await db.getFirstAsync<{ maquinas: number; respondidas: number }>(
+      `select count(distinct sb.id_sinibenfe) as maquinas, count(distinct sm.id_benmaq) as respondidas
+       from sinibenfe sb
+       left join sinistro_maquina sm on sm.id_benmaq = sb.id_sinibenfe and sm.id_sinistro = sb.id_sinistro
+       where sb.tipo_bene = 'MAQ' and sb.id_sinistro = ?`,
+      [idSinistro],
+    );
+    if (!row) return false;
+    return row.maquinas > 0 && row.maquinas <= row.respondidas;
+  }
+
+  // Máquina em local determinado responde só os itens de localização — cobrar o questionário
+  // predial inteiro aqui travaria o "Próximo" num checklist que nunca teria como ficar completo.
+  const filtroItens =
+    tipo_apolice === 'MAQ' ? ` where ai.id_item in (${ITENS_APOLICE_MAQUINA_LOCAL.join(',')})` : '';
+
   const row = await db.getFirstAsync<{ totseg: number; totsin: number }>(
     `select count(ai.id_item) as totseg, count(sa.id_item) as totsin
      from apolice_item ai
-     left join sinistro_apolice sa on sa.id_item = ai.id_item and sa.id_sinistro = ?`,
+     left join sinistro_apolice sa on sa.id_item = ai.id_item and sa.id_sinistro = ?${filtroItens}`,
     [idSinistro],
   );
   if (!row) return true;

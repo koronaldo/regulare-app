@@ -50,7 +50,7 @@ export async function listarSinistrosParaRoteiro(codreg: number): Promise<Sinist
     `select id_sinistro, nro_sinistro, nm_segurado, endereco, nro_predio, bairro, cep, nm_cidade, id_estado
      from sinimob
      where id_regulador = ? and data_vistoria is null
-     order by nm_cidade, bairro, cep`,
+     order by id_estado, nm_cidade, bairro, cep, endereco`,
     [codreg],
   );
 }

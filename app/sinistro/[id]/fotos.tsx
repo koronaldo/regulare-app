@@ -39,8 +39,9 @@ import {
 import { buscarSinistroPorId } from '../../../src/db/sinistros';
 import { transferirFotoUnica } from '../../../src/services/transferenciaFotos';
 import { mostrarAlerta } from '../../../src/utils/alerta';
+import { reduzImagem } from '../../../src/utils/imagem';
+import { lerFotoPendente, limparFotoPendente, salvarFotoPendente } from '../../../src/services/fotoPendente';
 
-const DIMENSAO_MAXIMA = 1600;
 const NUM_COLUNAS_GRADE = 4;
 
 function diretorioFotos(idSinistro: number): Directory {
@@ -49,29 +50,19 @@ function diretorioFotos(idSinistro: number): Directory {
   return dir;
 }
 
-/** Reduz e comprime a foto antes de gravar no app, evitando armazenar imagens muito grandes. */
+/**
+ * Reduz e comprime a foto antes de gravar no app. Delega pro reduzImagem compartilhado (que usa
+ * react-native-compressor): esta tela tinha uma cópia própria baseada em expo-image-manipulator,
+ * que decodificava o bitmap inteiro e estourava o heap do aparelho com fotos de câmera — era o
+ * que fechava o app ao salvar a foto.
+ */
 async function processarImagem(
   uri: string,
   idSinistro: number,
   largura: number,
   altura: number,
 ): Promise<string> {
-  let contexto = ImageManipulator.manipulate(uri);
-  const maiorLado = Math.max(largura, altura);
-  if (maiorLado > DIMENSAO_MAXIMA) {
-    const escala = DIMENSAO_MAXIMA / maiorLado;
-    contexto = contexto.resize({
-      width: Math.round(largura * escala),
-      height: Math.round(altura * escala),
-    });
-  }
-  const renderizada = await contexto.renderAsync();
-  const resultado = await renderizada.saveAsync({ format: SaveFormat.JPEG, compress: 0.75 });
-
-  const dir = diretorioFotos(idSinistro);
-  const destino = new File(dir, `foto_${Date.now()}.jpg`);
-  await new File(resultado.uri).move(destino);
-  return destino.uri;
+  return reduzImagem(uri, largura, altura, diretorioFotos(idSinistro), 'foto');
 }
 
 interface EstadoComplemento {
@@ -103,6 +94,8 @@ export default function FotosScreen() {
   const [complemento, setComplemento] = useState<EstadoComplemento | null>(null);
   const [renomeando, setRenomeando] = useState<string | null>(null);
   const [enviandoFoto, setEnviandoFoto] = useState(false);
+  /** Garante que a recuperação da foto pendente seja tentada uma vez só por montagem da tela. */
+  const recuperacaoTentada = useRef(false);
 
   const sortable = useSortableList({
     data: fotos,
@@ -170,8 +163,12 @@ export default function FotosScreen() {
       mostrarAlerta('Permissão necessária', 'Autorize o uso da câmera para tirar fotos.');
       return;
     }
+    // O Android pode destruir esta tela enquanto a câmera está aberta: a legenda escolhida fica
+    // guardada fora da memória do processo pra foto não se perder na volta.
+    await salvarFotoPendente({ idSinistro, idLegenda: idLegendaSelecionada });
     const resultado = await ImagePicker.launchCameraAsync({ quality: 0.9 });
-    processarResultadoPicker(resultado);
+    await limparFotoPendente();
+    await processarResultadoPicker(resultado);
   }
 
   async function escolherDaGaleria() {
@@ -180,21 +177,27 @@ export default function FotosScreen() {
       mostrarAlerta('Permissão necessária', 'Autorize o acesso às fotos.');
       return;
     }
+    await salvarFotoPendente({ idSinistro, idLegenda: idLegendaSelecionada });
     const resultado = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: 'images',
       quality: 0.9,
     });
-    processarResultadoPicker(resultado);
+    await limparFotoPendente();
+    await processarResultadoPicker(resultado);
   }
 
-  function processarResultadoPicker(resultado: ImagePicker.ImagePickerResult) {
+  async function processarResultadoPicker(
+    resultado: ImagePicker.ImagePickerResult,
+    legendaForcada?: LegendaFoto,
+  ) {
     if (resultado.canceled || !resultado.assets?.[0]) return;
     const asset = resultado.assets[0];
-    const legenda = legendas.find((l) => String(l.id_legendaf) === idLegendaSelecionada);
+    const legenda = legendaForcada ?? legendas.find((l) => String(l.id_legendaf) === idLegendaSelecionada);
     if (!legenda) return;
 
     if (legenda.tipo_leg === 'FX') {
-      finalizarFoto(asset.uri, asset.width, asset.height, legenda.nm_legendaf);
+      // Legenda fixa: grava direto com o nome dela, sem pedir complemento.
+      await finalizarFoto(asset.uri, asset.width, asset.height, legenda.nm_legendaf);
     } else {
       setComplemento({
         legenda,
@@ -205,6 +208,37 @@ export default function FotosScreen() {
       });
     }
   }
+
+  /**
+   * Se o Android destruiu esta tela enquanto a câmera estava aberta (acontece por pressão de
+   * memória), a foto tirada não volta pelo launchCameraAsync() original — que nunca retorna — e
+   * sim por getPendingResultAsync() na remontagem. Sem isso a foto é perdida, e pro usuário
+   * parece que "o app fechou e sumiu tudo". Ver a nota sobre MainActivity na doc do expo-image-picker.
+   */
+  useEffect(() => {
+    if (legendas.length === 0 || recuperacaoTentada.current) return;
+    recuperacaoTentada.current = true;
+
+    async function recuperarFotoPendente() {
+      const pendente = await lerFotoPendente();
+      if (!pendente || pendente.idSinistro !== idSinistro) return;
+      await limparFotoPendente();
+
+      const resultado = await ImagePicker.getPendingResultAsync();
+      if (!resultado || 'code' in resultado) return;
+
+      const legenda = legendas.find((l) => String(l.id_legendaf) === pendente.idLegenda);
+      if (!legenda) return;
+
+      setIdLegendaSelecionada(pendente.idLegenda);
+      await processarResultadoPicker(resultado, legenda);
+    }
+
+    recuperarFotoPendente();
+    // processarResultadoPicker fica de fora de propósito: ela é recriada a cada render, e a ref
+    // acima já garante que a recuperação roda uma única vez por montagem da tela.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [legendas, idSinistro]);
 
   async function confirmarComplemento() {
     if (!complemento) return;
