@@ -140,10 +140,6 @@ export default function AberturaScreen() {
       <StatusBar style="dark" />
       <View style={styles.conteudo}>
         <View style={styles.logoArea}>
-          {/* A sombra fica neste círculo atrás do logo: aplicada direto na imagem, o Android
-              desenha um retângulo em volta do PNG transparente. */}
-          <View style={styles.sombraLogo} />
-
           {camadas.map((camada) => (
             <Animated.View
               key={camada.profundidade}
@@ -228,18 +224,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 20,
-  },
-  sombraLogo: {
-    position: 'absolute',
-    width: 104,
-    height: 104,
-    borderRadius: 52,
-    backgroundColor: '#fff',
-    elevation: 10,
-    shadowColor: '#1c3d5a',
-    shadowOpacity: 0.3,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 6 },
   },
   camada: {
     position: 'absolute',

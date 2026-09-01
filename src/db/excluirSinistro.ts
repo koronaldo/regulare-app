@@ -49,6 +49,29 @@ export async function excluirSinistroCompleto(idSinistro: number): Promise<void>
   if (pasta.exists) pasta.delete();
 }
 
+/** Sinistros vistoriados há pelo menos esse número de dias saem do aparelho a cada login. */
+const DIAS_LIMITE_VISTORIA_ANTIGA = 45;
+
+/**
+ * Rotina de limpeza automática ao logar: remove por completo (registro + todas as tabelas
+ * relacionadas + pasta de arquivos) todo sinistro cuja `data_vistoria` já passou de
+ * DIAS_LIMITE_VISTORIA_ANTIGA dias. Sinistros sem vistoria registrada (`data_vistoria` nula, ainda
+ * em andamento) nunca são removidos por essa rotina. Ação local — não afeta o servidor.
+ */
+export async function removerSinistrosVistoriadosAntigos(): Promise<number> {
+  const db = await getDb();
+  const antigos = await db.getAllAsync<{ id_sinistro: number }>(
+    `select id_sinistro from sinimob where data_vistoria is not null and data_vistoria < date('now', ?)`,
+    [`-${DIAS_LIMITE_VISTORIA_ANTIGA} days`],
+  );
+
+  for (const { id_sinistro } of antigos) {
+    await excluirSinistroCompleto(id_sinistro);
+  }
+
+  return antigos.length;
+}
+
 /**
  * Porta de "Limpar Dispositivo" (menu do dashboard): apaga TODOS os processos e os respectivos
  * logs salvos no aparelho, mas preserva o cadastro do usuário logado (tabelas `usuarioff` e

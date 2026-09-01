@@ -1,5 +1,6 @@
 import { notificarSinistrosNovos, registrarVerificacaoPeriodica, verificarMensagensNovas } from './backgroundSync';
 import { lerCredenciais, prepararSenha, salvarCredenciais } from './credenciais';
+import { removerSinistrosVistoriadosAntigos } from '../db/excluirSinistro';
 import { importarDadosEstaticos, importarDadosLogin, precisaDadosEstaticos } from '../db/importLogin';
 import { inicializarBancoLocal } from '../db/schema';
 import { idsSinistrosLocais, listaSinistrosLocais } from '../db/sinistros';
@@ -104,6 +105,8 @@ async function autenticarEImportar(usuario: string, senhaEnvio: string): Promise
     await inicializarBancoLocal();
     const idsAntes = await idsSinistrosLocais();
     await importarDadosLogin(json, usuario);
+    const removidos = await removerSinistrosVistoriadosAntigos();
+    if (removidos > 0) console.log(`[auth] sinistros vistoriados há mais de 45 dias removidos: ${removidos}`);
     await sincronizarDadosEstaticosSeNecessario();
     await salvarCredenciais({ usuario, senhaEnvio });
     await registrarVerificacaoPeriodica();

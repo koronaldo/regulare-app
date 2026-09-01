@@ -145,19 +145,11 @@ export default function FotosScreen() {
     return lista;
   }
 
-  function iniciarCaptura() {
+  async function capturarDaCamera() {
     if (!idLegendaSelecionada) {
       mostrarAlerta('Atenção', 'Informe a legenda antes de tirar a foto.');
       return;
     }
-    mostrarAlerta('Nova foto', 'Como deseja obter a foto?', [
-      { text: 'Cancelar' },
-      { text: 'Câmera', onPress: capturarDaCamera },
-      { text: 'Galeria', onPress: escolherDaGaleria },
-    ]);
-  }
-
-  async function capturarDaCamera() {
     const permissao = await ImagePicker.requestCameraPermissionsAsync();
     if (!permissao.granted) {
       mostrarAlerta('Permissão necessária', 'Autorize o uso da câmera para tirar fotos.');
@@ -172,6 +164,10 @@ export default function FotosScreen() {
   }
 
   async function escolherDaGaleria() {
+    if (!idLegendaSelecionada) {
+      mostrarAlerta('Atenção', 'Informe a legenda antes de escolher a foto.');
+      return;
+    }
     const permissao = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permissao.granted) {
       mostrarAlerta('Permissão necessária', 'Autorize o acesso às fotos.');
@@ -477,13 +473,24 @@ export default function FotosScreen() {
           </View>
           <Pressable
             style={[styles.botaoCapturar, processando && styles.botaoDesabilitado]}
-            onPress={iniciarCaptura}
+            onPress={capturarDaCamera}
             disabled={processando}
           >
             {processando ? (
               <ActivityIndicator color="#fff" />
             ) : (
               <Ionicons name="camera" size={22} color="#fff" />
+            )}
+          </Pressable>
+          <Pressable
+            style={[styles.botaoCapturar, processando && styles.botaoDesabilitado]}
+            onPress={escolherDaGaleria}
+            disabled={processando}
+          >
+            {processando ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Ionicons name="images" size={22} color="#fff" />
             )}
           </Pressable>
         </View>

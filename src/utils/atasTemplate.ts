@@ -133,6 +133,17 @@ export function paraDataPorExtenso(dataIso: string | null | undefined): string {
 }
 
 /**
+ * Converte um texto digitado em textarea (quebras de linha e espaços múltiplos) pro equivalente em
+ * HTML — sem isso, o navegador colapsa tudo numa linha só ao renderizar a ata. Porta de nl2br
+ * (gera_config_pdf.js: respo_vistoria/respo_segurado).
+ */
+export function paraHtmlMultilinha(texto: string): string {
+  return texto
+    .replace(/ {2,}/g, (espacos) => '&nbsp;'.repeat(espacos.length))
+    .replace(/\r\n|\r|\n/g, '<br>');
+}
+
+/**
  * Divide os dígitos de um CPF/CNPJ em variáveis separadas, uma por dígito, para preencher os
  * campos de caixinha usados em alguns modelos de ata (padrão `<DIGF1>`..`<DIGFn>` para pessoa
  * física e `<DIGJ1>`..`<DIGJn>` para pessoa jurídica). Porta do laço em atualizaLayoutAta.

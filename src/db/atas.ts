@@ -3,6 +3,7 @@ import { buscarRelato } from './relato';
 import {
   paraDataBR,
   paraDataPorExtenso,
+  paraHtmlMultilinha,
   digitosParaVariaveis,
   substituirVariaveisAta,
   paginaTemConteudo,
@@ -65,7 +66,7 @@ export async function listarAtasDisponiveis(idSinistro: number): Promise<AtaDisp
        inner join modelo_atas ma on ma.id_modata = ad.id_modata
        left join sinidoc sd on sd.id_sinistro = ? and sd.id_documento = ad.id_documento
        where ad.id_seguradora = ?${filtrarPorProduto ? ' and (ad.id_produto = ? or ad.id_produto is null)' : ''}
-       order by ma.nm_modata`,
+       order by ad.id_modata`,
       filtrarPorProduto
         ? [idSinistro, idSinistro, base!.id_seguradora, base!.id_produto]
         : [idSinistro, idSinistro, base!.id_seguradora],
@@ -175,9 +176,13 @@ interface LinhaSinimobAta {
   fone: string | null;
   celular: string | null;
   contatoseg: string | null;
-  vlr_prejuizo: number | null;
+  vlr_estimativa: number | null;
   data_aviso: string | null;
   situacao: string | null;
+  id_preserva: string | null;
+  nm_regulador: string | null;
+  fonereg: string | null;
+  celureg: string | null;
   atendente: string | null;
   atendente_ass: string | null;
   emailseg: string | null;
@@ -200,19 +205,185 @@ interface LinhaSinimobAta {
   nm_produto: string | null;
 }
 
+interface LinhaPlanilhaTermo {
+  id_cobertura: number;
+  nm_cobertura: string | null;
+  tipo_cob: string | null;
+  nm_planilha_item: string | null;
+  grupoitem: string | null;
+  nm_planilha: string | null;
+  // qtde/vlr_uni_rec/vlr_tot_rec são gravados como texto formatado em BR ("1.250,00", vírgula
+  // decimal), não número puro — ver paraTextoValor em planilha.tsx — então chegam aqui como string.
+  qtde: string | number | null;
+  vlr_uni_rec: string | number | null;
+  vlr_tot_rec: string | number | null;
+  vlr_franquia: number | null;
+  perc_franquia: number | null;
+}
+
+const COLUNAS_TERMO_PREJUIZO = 5;
+
+/** Espelha paraNumero (planilha.tsx): converte "1.250,00" (ou já number) num número de verdade. */
+function paraNumeroTermoPrejuizo(v: string | number | null): number {
+  if (typeof v === 'number') return Number.isNaN(v) ? 0 : v;
+  const limpo = (v ?? '').toString().replace(/[^\d,-]/g, '').replace(',', '.');
+  const n = Number(limpo || '0');
+  return Number.isNaN(n) ? 0 : n;
+}
+
+function formatarValorTermoPrejuizo(v: number | null): string {
+  return (v ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+}
+
+function abrirTabelaCoberturaTermo(nomeCobertura: string): string {
+  return (
+    '<table border="1" style="width:100%;border-collapse:collapse;font-family:sans-serif;font-size:12px;margin-bottom:6px;">' +
+    `<tr><td colspan="${COLUNAS_TERMO_PREJUIZO}" style="background-color:#cdcdcd;text-align:center;"><b>${nomeCobertura}</b></td></tr>` +
+    '<tr>' +
+    '<td style="background-color:#6495ED;color:#fff;text-align:center;width:40px;">Item</td>' +
+    '<td style="background-color:#6495ED;color:#fff;text-align:center;">Descrição</td>' +
+    '<td style="background-color:#6495ED;color:#fff;text-align:center;width:70px;">Quantidade</td>' +
+    '<td style="background-color:#6495ED;color:#fff;text-align:center;width:85px;">Valor Unitário(R$)</td>' +
+    '<td style="background-color:#6495ED;color:#fff;text-align:center;width:90px;">Valor Fixado(R$)</td>' +
+    '</tr>'
+  );
+}
+
+function linhaSubtotalGrupoTermo(nomeItem: string, total: number): string {
+  return (
+    `<tr><td colspan="2" style="background-color:#F5F6CE;">&nbsp;&nbsp;&nbsp;${nomeItem}</td>` +
+    `<td colspan="3" style="background-color:#F5F6CE;text-align:right;"><b>${formatarValorTermoPrejuizo(total)}&nbsp;</b></td></tr>`
+  );
+}
+
+function fecharTabelaCoberturaTermo(total: number, franquia: { perc: number; valor: number }): string {
+  return (
+    `<tr><td colspan="4" style="text-align:right;">Total Fixado (R$)</td>` +
+    `<td style="background-color:#cacaca;text-align:right;">${formatarValorTermoPrejuizo(total)}&nbsp;</td></tr>` +
+    '<tr><td colspan="3" style="color:red;border-color:black;"><b>Será deduzida a franquia de ... % do prejuízo com mínimo de:</b></td>' +
+    `<td style="background-color:#cacaca;text-align:right;color:red;border-color:black;"><b>${franquia.perc.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} %</b></td>` +
+    `<td style="background-color:#cacaca;text-align:right;color:red;border-color:black;"><b>${formatarValorTermoPrejuizo(franquia.valor)}</b></td></tr>` +
+    '</table>'
+  );
+}
+
+/**
+ * Porta de CarregandoCoberturasPla (gera_config_pdf.js): monta a tabela do Termo de Fixação de
+ * Prejuízo — agrupada por cobertura (barra cinza com nome+tipo) e por item da planilha (subtotal
+ * em amarelo claro), com o total fixado e a linha vermelha de franquia ao fechar cada cobertura.
+ * idite/idsub (numeração "1.1", "1.2", "2.1"...) são contadores globais que avançam ao longo de
+ * toda a planilha, exatamente como no legado — não reiniciam a cada cobertura.
+ * Usa <table> em vez das divs com float+largura fixa do legado (mesmo motivo do bloco de Outros
+ * Seguros: o container real da ata é mais estreito que o previsto, e tabela se ajusta sozinha).
+ */
+async function montarPlanilhaTermoPrejuizo(db: Awaited<ReturnType<typeof getDb>>, idSinistro: number): Promise<string[]> {
+  const planilha = await db.getAllAsync<LinhaPlanilhaTermo>(
+    `select pa.id_cobertura, cb.nm_cobertura, cb.tipo_cob, pa.nm_planilha_item, pa.grupoitem,
+       pa.nm_planilha, pa.qtde, pa.vlr_uni_rec, pa.vlr_tot_rec, sb.vlr_franquia, sb.perc_franquia
+     from planilha_apuracao pa
+     left join cobertura cb on cb.id_cobertura = pa.id_cobertura
+     left join sinimobcob sb on sb.id_sinistro = pa.id_sinistro and sb.id_cobertura = pa.id_cobertura
+     where pa.id_sinistro = ?
+     order by pa.id_cobertura, pa.grupoitem, pa.id_planilha`,
+    [idSinistro],
+  );
+  if (planilha.length === 0) return [];
+
+  // Um bloco por cobertura (tabela completa, já fechada com total+franquia) — cada cobertura
+  // imprime como um termo à parte, então a quebra de página é aplicada por bloco no final, em vez
+  // de um marcador solto entre eles: presa na própria tabela (elemento com conteúdo real), não
+  // depende do container ao redor de <PLANILHA_BENS> respeitar um <div> vazio como quebra.
+  const blocosCobertura: string[] = [];
+  let blocoAtual = '';
+  let idite = 0;
+  let idsub = 0;
+  let cobAnterior: number | null = null;
+  let itemAnterior = '';
+  let grupoAnterior = '';
+  let totalGrupo = 0;
+  let totalCobertura = 0;
+  let franquiaCobertura = { perc: 0, valor: 0 };
+
+  for (let i = 0; i < planilha.length; i++) {
+    const linha = planilha[i];
+    const itemAtual = linha.nm_planilha_item ?? '';
+    const grupoAtual = linha.grupoitem ?? '';
+    const qtdeAtual = paraNumeroTermoPrejuizo(linha.qtde);
+    const vlrUniAtual = paraNumeroTermoPrejuizo(linha.vlr_uni_rec);
+    const totrecAtual = paraNumeroTermoPrejuizo(linha.vlr_tot_rec);
+
+    if (i > 0 && itemAtual !== itemAnterior) {
+      blocoAtual += linhaSubtotalGrupoTermo(itemAnterior, totalGrupo);
+      totalGrupo = 0;
+    }
+    if (i > 0 && linha.id_cobertura !== cobAnterior) {
+      blocoAtual += fecharTabelaCoberturaTermo(totalCobertura, franquiaCobertura);
+      blocosCobertura.push(blocoAtual);
+      blocoAtual = '';
+      totalCobertura = 0;
+    }
+
+    totalCobertura += totrecAtual;
+    totalGrupo += totrecAtual;
+    franquiaCobertura = { perc: linha.perc_franquia ?? 0, valor: linha.vlr_franquia ?? 0 };
+
+    if (grupoAtual !== grupoAnterior) {
+      idite++;
+      idsub = 0;
+    }
+    idsub++;
+
+    if (i === 0 || linha.id_cobertura !== cobAnterior) {
+      blocoAtual += abrirTabelaCoberturaTermo(`${linha.nm_cobertura ?? ''} - ${linha.tipo_cob ?? ''}`);
+    }
+
+    blocoAtual +=
+      `<tr><td style="text-align:center;">${idite}.${idsub}</td>` +
+      `<td>${linha.nm_planilha ?? ''}</td>` +
+      `<td style="text-align:right;">${qtdeAtual.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}&nbsp;</td>` +
+      `<td style="text-align:right;">${formatarValorTermoPrejuizo(vlrUniAtual)}&nbsp;</td>` +
+      `<td style="text-align:right;">${formatarValorTermoPrejuizo(totrecAtual)}&nbsp;</td></tr>`;
+
+    itemAnterior = itemAtual;
+    grupoAnterior = grupoAtual;
+    cobAnterior = linha.id_cobertura;
+  }
+
+  blocoAtual += linhaSubtotalGrupoTermo(itemAnterior, totalGrupo);
+  blocoAtual += fecharTabelaCoberturaTermo(totalCobertura, franquiaCobertura);
+  blocosCobertura.push(blocoAtual);
+
+  return blocosCobertura;
+}
+
 /**
  * Porta de atualizaLayoutAta (gera_config_pdf.js): monta o mapa `<TAG>` -> valor com os dados do
  * sinistro, benfeitoria, planilha, beneficiário e documentos. Tags sem fonte de dados local
  * conhecida (respostas de questionário dinâmico, notas de avaliação, logos) ficam de fora do mapa
  * e permanecem literais no HTML gerado.
+ *
+ * `blocosPlanilha` (um bloco de tabela por cobertura do Termo de Prejuízo) vem separado de
+ * `variaveis['<PLANILHA_BENS>']` (que já traz tudo junto, como fallback) porque cada cobertura
+ * precisa imprimir como página à parte — repetindo a página inteira (cabeçalho+rodapé do modelo),
+ * não só a tabela — e só gerarHtmlAta tem acesso ao HTML bruto da página pra fazer essa repetição.
  */
-export async function montarVariaveisAta(idSinistro: number, assinaturaBase64: string): Promise<Record<string, string>> {
+export async function montarVariaveisAta(
+  idSinistro: number,
+  assinaturaBase64: string,
+): Promise<{ variaveis: Record<string, string>; blocosPlanilha: string[] }> {
   const db = await getDb();
 
+  // <VLR_ESTIMATIVA> soma sinimobcob.vlr_cob_estima (igual a CarregandoVariaveisPrejuizo em
+  // gera_config_pdf.js) em vez de ler sinimob.vlr_prejuizo — essa coluna nunca é gravada pelo
+  // app, só vem populada em registros importados do servidor.
+  // <REGULADOR> é o nome do vistoriador logado (usuarioff.nm_usuario), ligado via id_regulador —
+  // não confundir com <ATENDENTE>, que é quem recebeu a visita no local.
   const s = await db.getFirstAsync<LinhaSinimobAta>(
     `select mb.nm_segurado, mb.nro_sinistro, mb.nroreg_sinistro, mb.apolice, mb.proposta_seg,
        mb.datasol, mb.data_ocor, mb.hora_ocor, mb.endereco, mb.bairro, mb.cep, ci.nm_cidade, mb.id_estado,
-       mb.fone, mb.celular, mb.contatoseg, mb.vlr_prejuizo, mb.data_aviso, mb.situacao,
+       mb.fone, mb.celular, mb.contatoseg,
+       (select coalesce(sum(cast(sc.vlr_cob_estima as real)), 0) from sinimobcob sc where sc.id_sinistro = mb.id_sinistro) as vlr_estimativa,
+       mb.data_aviso, mb.situacao, mb.id_preserva, us.nm_usuario as nm_regulador, us.fonereg, us.celureg,
        mb.atendente, mb.atendente_ass, mb.emailseg, mb.tipo_doc, mb.cpf, mb.rgseg,
        mb.nm_sucursal, mb.nm_corretora, mb.fonecor, mb.emailcor, mb.data_vistoria,
        mb.datavig_ini, mb.datavig_fim, mb.outro_seguro,
@@ -226,10 +397,11 @@ export async function montarVariaveisAta(idSinistro: number, assinaturaBase64: s
      left join relacaoseg rl on rl.id_relacaoseg = mb.id_relacaoseg
      left join relacaoseg rla on rla.id_relacaoseg = mb.id_relacaoseg_ass
      left join seguradora se on se.id_seguradora = mb.id_seguradora
+     left join usuarioff us on us.id_regulador = mb.id_regulador
      where mb.id_sinistro = ?`,
     [idSinistro],
   );
-  if (!s) return {};
+  if (!s) return { variaveis: {}, blocosPlanilha: [] };
 
   const tipoPessoa: 'F' | 'J' = s.tipo_doc === 'J' ? 'J' : 'F';
 
@@ -252,8 +424,11 @@ export async function montarVariaveisAta(idSinistro: number, assinaturaBase64: s
     '<FONESEG>': s.fone ?? '',
     '<CELULARSEG>': s.celular ?? '',
     '<CONTATOSEG>': s.contatoseg ?? '',
-    '<VLR_ESTIMATIVA>': s.vlr_prejuizo != null ? s.vlr_prejuizo.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) : '',
+    '<VLR_ESTIMATIVA>': s.vlr_estimativa != null ? s.vlr_estimativa.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) : '',
     '<DATAAVISO>': paraDataBR(s.data_aviso),
+    '<REGULADOR>': s.nm_regulador ?? '',
+    '<FONEREG>': s.fonereg ?? '',
+    '<CELUREG>': s.celureg ?? '',
     '<ATENDENTE>': s.atendente ?? '',
     '<ATENDENTE_ASS>': s.atendente_ass ?? '',
     '<EMAILSEG>': s.emailseg ?? '',
@@ -264,7 +439,6 @@ export async function montarVariaveisAta(idSinistro: number, assinaturaBase64: s
     '<FONECOR>': s.fonecor ?? '',
     '<EMAILCOR>': s.emailcor ?? '',
     '<DATAVISTO>': paraDataBR(s.data_vistoria),
-    '<VISTORIA>': paraDataBR(s.data_vistoria),
     '<DATAVIG_INI>': paraDataBR(s.datavig_ini),
     '<DATAVIG_FIN>': paraDataBR(s.datavig_fim),
     '<CAUSA>': s.nm_causa ?? '',
@@ -285,24 +459,77 @@ export async function montarVariaveisAta(idSinistro: number, assinaturaBase64: s
     variaveis['<OUTROSIM>'] = ' ';
     variaveis['<OUTRONAO>'] = 'X';
   }
-  const outro = await db.getFirstAsync<{
+
+  // Bens preservados (id_preserva 'S'/'N'/'A') vira 3 checkboxes no HTML, igual ao legado
+  // (CarregandoVariaveis em gera_config_pdf.js: bempresesim/nao/parte_view).
+  variaveis['<BEMPRESE_SIM>'] = s.id_preserva === 'S' ? 'X' : '';
+  variaveis['<BEMPRESE_NAO>'] = s.id_preserva === 'N' ? 'X' : '';
+  variaveis['<BEMPRESE_PARTE>'] = s.id_preserva === 'A' ? 'X' : '';
+  const outrosSeguros = await db.getAllAsync<{
     apolice: string | null;
     nm_seguradora: string | null;
+    data_ini_vig: string | null;
+    data_fim_vig: string | null;
+    vlr_lmi: number | null;
+    vlr_franquia: number | null;
+    perc_franquia: number | null;
   }>(
-    `select so.apolice, se.nm_seguradora
+    `select so.apolice, se.nm_seguradora, so.data_ini_vig, so.data_fim_vig, so.vlr_lmi, so.vlr_franquia, so.perc_franquia
      from sinimobcob_outro so
      left join seguradora se on se.id_seguradora = so.id_seguradora
-     where so.id_sinistro = ? limit 1`,
+     where so.id_sinistro = ?
+     order by so.id_outro`,
     [idSinistro],
   );
-  variaveis['<SEGURADORAOUT>'] = outro?.nm_seguradora ?? '';
-  variaveis['<APOLICEOUT>'] = outro?.apolice ?? '';
+  variaveis['<SEGURADORAOUT>'] = outrosSeguros[0]?.nm_seguradora ?? '';
+  variaveis['<APOLICEOUT>'] = outrosSeguros[0]?.apolice ?? '';
+
+  // <LISTA_OUTROSEG>/<STATUS_OUTROSEG>: bloco por seguro cadastrado, mesmos dados de
+  // PreencheOutrosSeg (gera_config_pdf.js) — não confundir com <SEGURADORAOUT>/<APOLICEOUT> acima,
+  // que só mostram o primeiro registro (usados num modelo de ata diferente). Usa <table> em vez das
+  // divs com float+largura fixa (975px) do legado: aquele layout pressupõe a página inteira como
+  // container e estourava a largura real (~730px) do container desse modelo, quebrando o resto da
+  // ata. Largura fixa 730px (não 100%) porque o próprio container no modelo tem `width:735` sem
+  // unidade — CSS inválido que o motor de renderização ignora, fazendo o div encolher pro conteúdo;
+  // width:100% relativo a esse pai também encolhia, então a tabela precisa do valor absoluto.
+  const formatarValorOutroSeg = (v: number | null) =>
+    v != null ? v.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) : '';
+  variaveis['<STATUS_OUTROSEG>'] = outrosSeguros.length > 0 ? 'Sim' : 'Não';
+  variaveis['<LISTA_OUTROSEG>'] = outrosSeguros
+    .map((o) => {
+      const vigencia = `${paraDataBR(o.data_ini_vig)} à ${paraDataBR(o.data_fim_vig)}`;
+      return (
+        '<table border="1" style="width:730px;border-collapse:collapse;font-family:sans-serif;font-size:12px;margin-bottom:4px;">' +
+        '<tr>' +
+        '<td><b>Apólice</b></td><td><b>Seguradora</b></td><td><b>Vigência</b></td>' +
+        '</tr><tr>' +
+        `<td>${o.apolice ?? ''}</td><td>${o.nm_seguradora ?? ''}</td><td style="text-align:center">${vigencia}</td>` +
+        '</tr><tr>' +
+        '<td><b>Franquia R$</b></td><td><b>Franquia %</b></td><td><b>L.M.I.</b></td>' +
+        '</tr><tr>' +
+        `<td style="text-align:right">${formatarValorOutroSeg(o.vlr_franquia)}</td>` +
+        `<td style="text-align:right">${formatarValorOutroSeg(o.perc_franquia)}</td>` +
+        `<td style="text-align:right">${formatarValorOutroSeg(o.vlr_lmi)}</td>` +
+        '</tr></table>'
+      );
+    })
+    .join('');
 
   const relato = await buscarRelato(idSinistro, 4);
   variaveis['<RELATO_SEGURADO>'] = relato.subtextos
     .map((sub) => sub.resposta)
     .filter(Boolean)
-    .join('\n\n');
+    .map((resposta) => paraHtmlMultilinha(resposta))
+    .join('<br>');
+
+  // <VISTORIA> é o texto de "Constatações do regulador" (tela `parecer`, id_texto=5) — igual ao
+  // legado (relvistoria_view, sinitextomob id_texto=5). Não confundir com <DATAVISTO>, a data.
+  const constatacoes = await buscarRelato(idSinistro, 5);
+  variaveis['<VISTORIA>'] = constatacoes.subtextos
+    .map((sub) => sub.resposta)
+    .filter(Boolean)
+    .map((resposta) => paraHtmlMultilinha(resposta))
+    .join('<br>');
 
   const benfeitoria = await db.getFirstAsync<{
     construcao: string | null;
@@ -382,29 +609,8 @@ export async function montarVariaveisAta(idSinistro: number, assinaturaBase64: s
     variaveis['<DIGCONTA>'] = beneficiario.digconta ?? '';
   }
 
-  const planilha = await db.getAllAsync<{
-    nm_planilha_item: string | null;
-    qtde: number | null;
-    vlr_uni_apr: number | null;
-    vlr_tot_apr: number | null;
-  }>(
-    `select nm_planilha_item, qtde, vlr_uni_apr, vlr_tot_apr from planilha_apuracao where id_sinistro = ? order by id_planilha`,
-    [idSinistro],
-  );
-  if (planilha.length > 0) {
-    const linhasHtml = planilha
-      .map(
-        (p) =>
-          `<tr><td>${p.nm_planilha_item ?? ''}</td><td>${p.qtde ?? ''}</td><td>${
-            p.vlr_uni_apr != null ? p.vlr_uni_apr.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) : ''
-          }</td><td>${p.vlr_tot_apr != null ? p.vlr_tot_apr.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) : ''}</td></tr>`,
-      )
-      .join('');
-    variaveis['<PLANILHA_BENS>'] =
-      `<table border="1" style="width:100%;border-collapse:collapse"><tr><td><b>Item</b></td><td><b>Qtde</b></td><td><b>Vlr. Unit.</b></td><td><b>Vlr. Total</b></td></tr>${linhasHtml}</table>`;
-  } else {
-    variaveis['<PLANILHA_BENS>'] = '';
-  }
+  const blocosPlanilha = await montarPlanilhaTermoPrejuizo(db, idSinistro);
+  variaveis['<PLANILHA_BENS>'] = blocosPlanilha.join('');
 
   const docs = await db.getFirstAsync<{ solicitados: string | null; entregues: string | null; pendentes: string | null }>(
     `select
@@ -440,7 +646,7 @@ export async function montarVariaveisAta(idSinistro: number, assinaturaBase64: s
     variaveis[`<COMENTA${resposta.id_perprod}>`] = resposta.complemento ?? '';
   }
 
-  return variaveis;
+  return { variaveis, blocosPlanilha };
 }
 
 /**
@@ -469,9 +675,25 @@ const MARGEM_CM_POR_MODATA: Record<number, number> = {
 export async function gerarHtmlAta(idSinistro: number, idModata: number, assinaturaBase64: string): Promise<string | null> {
   const paginas = await buscarLayoutsAta(idSinistro, idModata);
   if (paginas.length === 0) return null;
-  const variaveis = await montarVariaveisAta(idSinistro, assinaturaBase64);
+  const { variaveis, blocosPlanilha } = await montarVariaveisAta(idSinistro, assinaturaBase64);
 
-  const paginasPreenchidas = paginas
+  // Termo de Fixação de Prejuízo com mais de uma cobertura: cada cobertura imprime como página à
+  // parte, então a página que contém <PLANILHA_BENS> é repetida uma vez por cobertura (cabeçalho e
+  // rodapé do modelo se repetem junto, só a tabela muda), com quebra de página entre as repetições.
+  const paginasExpandidas =
+    blocosPlanilha.length > 1
+      ? paginas.flatMap((pagina) => {
+          if (!pagina.includes('<PLANILHA_BENS>')) return [pagina];
+          return blocosPlanilha.map((bloco, i) => {
+            const paginaComUmaCobertura = pagina.split('<PLANILHA_BENS>').join(bloco);
+            return i < blocosPlanilha.length - 1
+              ? paginaComUmaCobertura + '<div style="page-break-after: always;">&nbsp</div>'
+              : paginaComUmaCobertura;
+          });
+        })
+      : paginas;
+
+  const paginasPreenchidas = paginasExpandidas
     .map((pagina) => substituirVariaveisAta(pagina, variaveis))
     .filter((paginaPronta) => paginaTemConteudo(paginaPronta));
 

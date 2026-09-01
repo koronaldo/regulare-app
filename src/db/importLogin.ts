@@ -40,6 +40,22 @@ function n(v: unknown): BindValue {
 }
 
 /**
+ * O backend legado manda alguns campos de data já convertidos pra "DD/MM/AAAA" (função MudaData
+ * em funcoes_novo.php, ex.: datasol, data_ocor, data_aviso), enquanto o resto do app (CampoData,
+ * paraDataBR/paraDataPorExtenso em atasTemplate.ts) espera ISO "AAAA-MM-DD" — sem essa conversão,
+ * a data fica salva em BR e todo consumidor que faz `.split('-')` esperando ISO falha silenciosamente
+ * (retorna vazio) pros sinistros importados, mesmo com o campo preenchido no banco.
+ */
+function nData(v: unknown): BindValue {
+  const valor = n(v);
+  if (typeof valor !== 'string') return valor;
+  const match = valor.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (!match) return valor;
+  const [, dia, mes, ano] = match;
+  return `${ano}-${mes}-${dia}`;
+}
+
+/**
  * Especificações portadas de RegulareMobile4.0/www/js/importa_dados.js.
  * Cada bloco corresponde a um `if (json.result_X == true) { ... }` do app legado.
  *
@@ -655,16 +671,16 @@ function sinimobValues(r: Row): BindValue[] {
   return [
     n(r.id_sinistro), n(r.id_reguladora), n(r.id_regulador),
     n(r.id_seguradora), n(r.id_segurado), n(r.nm_segurado),
-    n(r.id_produto), n(r.nm_produto), n(r.nro_sinistro), n(r.nroreg_sinistro), n(r.apolicie), n(r.datasol), n(r.data_ocor),
-    n(r.data_age_vistoria), n(r.horai_age_vistoria), null, n(r.nm_causa), n(r.endereco), n(r.bairro), n(r.cep),
-    n(r.id_cidade), n(r.nm_cidade), n(r.id_estado), n(r.fone), n(r.celular), n(r.contato), n(r.vlr_prejuizo), n(r.data_avis),
+    n(r.id_produto), n(r.nm_produto), n(r.nro_sinistro), n(r.nroreg_sinistro), n(r.apolicie), nData(r.datasol), nData(r.data_ocor),
+    nData(r.data_age_vistoria), n(r.horai_age_vistoria), null, n(r.nm_causa), n(r.endereco), n(r.bairro), n(r.cep),
+    n(r.id_cidade), n(r.nm_cidade), n(r.id_estado), n(r.fone), n(r.celular), n(r.contato), n(r.vlr_prejuizo), nData(r.data_avis),
     n(r.id_corretora), 'A', n(r.hora_ocor), n(r.hora_incerta), null,
     n(r.sem_cobertura), n(r.email_seg), n(r.id_relacaoseg), n(r.atendente), n(r.id_preserva),
     n(r.tratar_ate), n(r.tratar_ass), n(r.id_relacaoseg_ass), n(r.atendente_ass),
     n(r.mesma_pessoa), n(r.outro_seguro), n(r.rg_assina), n(r.rg_atendente), n(r.apolicie),
     n(r.cpf), n(r.tipo_doc), n(r.rgseg), n(r.nm_sucursal),
-    n(r.nm_corretora), n(r.fonecor), n(r.emailcor), n(r.data_vistoria), n(r.data_vig_ini),
-    n(r.data_vig_fim), n(r.path_docs), n(r.proposta_seg), n(r.email_corretora_alternativo),
+    n(r.nm_corretora), n(r.fonecor), n(r.emailcor), nData(r.data_vistoria), nData(r.data_vig_ini),
+    nData(r.data_vig_fim), n(r.path_docs), n(r.proposta_seg), n(r.email_corretora_alternativo),
     n(r.contato_corretora_alternativo), n(r.fone_corretora_alternativo),
     n(r.id_causa_abe), n(r.id_sucursal), n(r.construcao), n(r.ocupacao), n(r.id_nacionalidade),
     n(r.id_civil), n(r.nro_predio), n(r.nro_unidade), 'N', n(r.id_tipoapolice),

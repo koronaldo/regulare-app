@@ -312,6 +312,20 @@ async function aplicarMigracoes(db: Awaited<ReturnType<typeof getDb>>): Promise<
     update ocupacao set ativo = case ativo when 'true' then 1 when 'false' then 0 when 't' then 1 when 'f' then 0 else ativo end;
     update sinimob set item_unico = case item_unico when 't' then 1 when 'f' then 0 when 'true' then 1 when 'false' then 0 else item_unico end;
   `);
+
+  // Conserta datas de sinistros já importados antes da correção de nData() em importLogin.ts: o
+  // backend legado manda datasol/data_ocor/data_aviso/etc. já formatadas "DD/MM/AAAA" (MudaData em
+  // funcoes_novo.php), mas sinimob usa "insert or ignore" — um sinistro já importado nunca é
+  // regravado num sync futuro, então sem esse conserto local a data ficava presa em BR pra sempre e
+  // paraDataBR()/paraDataPorExtenso() (que esperam ISO "AAAA-MM-DD") voltavam vazio. Idempotente:
+  // só casa o padrão DD/MM/AAAA, uma vez convertido pra ISO o where deixa de bater.
+  for (const coluna of ['datasol', 'data_ocor', 'data_aviso', 'data_vistoria', 'datavig_ini', 'datavig_fim', 'data_age_vistoria']) {
+    await db.runAsync(
+      `update sinimob set ${coluna} =
+         substr(${coluna}, 7, 4) || '-' || substr(${coluna}, 4, 2) || '-' || substr(${coluna}, 1, 2)
+       where length(${coluna}) = 10 and substr(${coluna}, 3, 1) = '/' and substr(${coluna}, 6, 1) = '/'`,
+    );
+  }
 }
 
 export async function inicializarBancoLocal(): Promise<void> {
