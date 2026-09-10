@@ -41,6 +41,7 @@ async function enviarPdf(
   envio: EnvioDocumento,
   usuario: string,
   senha: string,
+  token: string | undefined,
 ): Promise<{ sucesso: boolean; mensagem: string }> {
   try {
     const arquivo = new File(envio.uri);
@@ -51,6 +52,7 @@ async function enviarPdf(
       parameters: {
         usuario,
         senha,
+        ...(token ? { token } : {}),
         id_sinistro: String(idSinistro),
         id_documento: String(envio.idDocumento),
         chave_local: envio.chaveLocal,
@@ -83,6 +85,7 @@ async function enviarArquivosProntos(
   arquivos: ArquivoParaTransferencia[],
   usuario: string,
   senha: string,
+  token: string | undefined,
 ): Promise<{ enviados: number; falhas: string[] }> {
   let enviados = 0;
   const falhas: string[] = [];
@@ -102,6 +105,7 @@ async function enviarArquivosProntos(
       },
       usuario,
       senha,
+      token,
     );
     if (resultado.sucesso) {
       enviados++;
@@ -168,6 +172,7 @@ export async function transferirDocumentos(idSinistro: number): Promise<Resultad
         },
         credenciais.usuario,
         credenciais.senhaEnvio,
+        credenciais.token,
       );
       if (resultado.sucesso) {
         enviados++;
@@ -189,7 +194,13 @@ export async function transferirDocumentos(idSinistro: number): Promise<Resultad
     }
   }
 
-  const resultadoArquivos = await enviarArquivosProntos(idSinistro, arquivos, credenciais.usuario, credenciais.senhaEnvio);
+  const resultadoArquivos = await enviarArquivosProntos(
+    idSinistro,
+    arquivos,
+    credenciais.usuario,
+    credenciais.senhaEnvio,
+    credenciais.token,
+  );
   enviados += resultadoArquivos.enviados;
   falhas.push(...resultadoArquivos.falhas);
 
@@ -226,6 +237,7 @@ export async function transferirArquivoUnico(idSinistro: number, idDocpdf: numbe
     },
     credenciais.usuario,
     credenciais.senhaEnvio,
+    credenciais.token,
   );
 
   if (resultado.sucesso) {
@@ -265,6 +277,7 @@ export async function transferirInstanciaUnica(
       },
       credenciais.usuario,
       credenciais.senhaEnvio,
+      credenciais.token,
     );
     if (resultado.sucesso) {
       await marcarInstanciaEnviada(idSinistro, instancia.id_documento, instancia.grupopag);
@@ -315,6 +328,7 @@ export async function transferirAtaIndividual(
     desteModelo,
     credenciais.usuario,
     credenciais.senhaEnvio,
+    credenciais.token,
   );
 
   if (falhas.length === 0) {
@@ -337,7 +351,13 @@ export async function transferirAtas(idSinistro: number): Promise<ResultadoTrans
     return { sucesso: false, mensagem: 'Nenhuma ata/termo assinado neste sinistro para transferir.' };
   }
 
-  const { enviados, falhas } = await enviarArquivosProntos(idSinistro, atas, credenciais.usuario, credenciais.senhaEnvio);
+  const { enviados, falhas } = await enviarArquivosProntos(
+    idSinistro,
+    atas,
+    credenciais.usuario,
+    credenciais.senhaEnvio,
+    credenciais.token,
+  );
 
   if (falhas.length === 0) {
     return { sucesso: true, mensagem: `${enviados} ata(s)/termo(s) enviado(s) com sucesso.` };

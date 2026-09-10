@@ -1,3 +1,5 @@
+import { lerCredenciais } from './credenciais';
+
 export function requireApiUrl(): string {
   const url = process.env.EXPO_PUBLIC_API_URL;
   if (!url) {
@@ -26,7 +28,12 @@ export async function postFormulario(
   campos: Record<string, string>,
   contexto: string,
 ): Promise<ResultadoTransferencia> {
-  const body = new URLSearchParams(campos).toString();
+  // Injeta o token de sessão (se houver) em toda chamada, sem exigir que os ~18 serviços de
+  // transferência mudem — eles continuam mandando usuario/senha, que o servidor usa como
+  // fallback caso o token esteja ausente ou vencido (ver autenticarOuToken em sessao.php).
+  const credenciais = await lerCredenciais();
+  const camposComToken = credenciais?.token ? { ...campos, token: credenciais.token } : campos;
+  const body = new URLSearchParams(camposComToken).toString();
 
   let response: Response;
   try {

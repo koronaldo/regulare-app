@@ -4,6 +4,8 @@ import { StatusBar } from 'expo-status-bar';
 import { router } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 
+import { sessaoValida } from '../src/services/credenciais';
+
 const DURACAO_GIRO_MS = 3200;
 const DURACAO_TITULO_MS = 1100;
 const DURACAO_SUBTITULO_MS = 800;
@@ -95,7 +97,21 @@ export default function AberturaScreen() {
     ]);
 
     sequencia.start(({ finished }) => {
-      if (finished) setTimeout(() => router.replace('/login'), PAUSA_FINAL_MS);
+      if (!finished) return;
+      setTimeout(async () => {
+        // Sessão de 24h ainda válida (ver auth.ts/credenciais.ts): pula a tela de login e abre
+        // direto no dashboard com os dados do último login — sem isso, o app pedia login toda
+        // vez que abria (ou que o Android matava o processo em segundo plano).
+        const sessao = await sessaoValida();
+        if (sessao) {
+          router.replace({
+            pathname: '/dashboard',
+            params: { codreg: sessao.codreg ?? '', nomusu: sessao.nomusu ?? '', nomregula: sessao.nomregula ?? '' },
+          });
+        } else {
+          router.replace('/login');
+        }
+      }, PAUSA_FINAL_MS);
     });
 
     return () => sequencia.stop();

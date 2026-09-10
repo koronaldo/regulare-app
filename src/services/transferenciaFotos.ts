@@ -32,7 +32,13 @@ async function prepararArquivoParaEnvio(uri: string): Promise<ArquivoParaEnvio> 
   return { uri: resultado.uri, temporario: true };
 }
 
-async function enviarFoto(idSinistro: number, foto: FotoResumo, usuario: string, senha: string): Promise<{ sucesso: boolean; mensagem: string }> {
+async function enviarFoto(
+  idSinistro: number,
+  foto: FotoResumo,
+  usuario: string,
+  senha: string,
+  token: string | undefined,
+): Promise<{ sucesso: boolean; mensagem: string }> {
   let arquivoEnvio: ArquivoParaEnvio | null = null;
   try {
     arquivoEnvio = await prepararArquivoParaEnvio(foto.arquivo);
@@ -45,6 +51,7 @@ async function enviarFoto(idSinistro: number, foto: FotoResumo, usuario: string,
       parameters: {
         usuario,
         senha,
+        ...(token ? { token } : {}),
         id_sinistro: String(idSinistro),
         id_foto: String(foto.id_foto),
         legenda: foto.legenda,
@@ -102,7 +109,7 @@ export async function transferirFotos(idSinistro: number): Promise<ResultadoTran
   const falhas: string[] = [];
 
   for (const foto of fotos) {
-    const resultado = await enviarFoto(idSinistro, foto, credenciais.usuario, credenciais.senhaEnvio);
+    const resultado = await enviarFoto(idSinistro, foto, credenciais.usuario, credenciais.senhaEnvio, credenciais.token);
     if (resultado.sucesso) {
       enviadas++;
       await marcarFotoEnviada(foto.id_foto);
@@ -133,7 +140,7 @@ export async function transferirFotoUnica(idSinistro: number, idFoto: number): P
     return { sucesso: false, mensagem: 'Foto não encontrada.' };
   }
 
-  const resultado = await enviarFoto(idSinistro, foto, credenciais.usuario, credenciais.senhaEnvio);
+  const resultado = await enviarFoto(idSinistro, foto, credenciais.usuario, credenciais.senhaEnvio, credenciais.token);
   if (resultado.sucesso) {
     await marcarFotoEnviada(foto.id_foto);
     return { sucesso: true, mensagem: 'Foto enviada com sucesso.' };

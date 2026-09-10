@@ -29,6 +29,7 @@ export async function verificarNovosSinistros(): Promise<SinistroNovo[]> {
   const body = new URLSearchParams({
     usuario: credenciais.usuario,
     senha: credenciais.senhaEnvio,
+    ...(credenciais.token ? { token: credenciais.token } : {}),
     lista_sini: await listaSinistrosLocais(),
   }).toString();
 

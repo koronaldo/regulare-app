@@ -19,6 +19,8 @@ function requireApiUrl(): string {
 const LOGIN_URL = requireApiUrl();
 /** dados_estaticos.php vive na mesma pasta de autentica_criptoX40.php. */
 const DADOS_ESTATICOS_URL = new URL('dados_estaticos.php', LOGIN_URL).toString();
+/** Revoga o token de sessão de 24h no servidor (ver sessao.php/logout_sessao.php). */
+const LOGOUT_URL = new URL('logout_sessao.php', LOGIN_URL).toString();
 
 export type LoginResult =
   | {
@@ -108,7 +110,15 @@ async function autenticarEImportar(usuario: string, senhaEnvio: string): Promise
     const removidos = await removerSinistrosVistoriadosAntigos();
     if (removidos > 0) console.log(`[auth] sinistros vistoriados há mais de 45 dias removidos: ${removidos}`);
     await sincronizarDadosEstaticosSeNecessario();
-    await salvarCredenciais({ usuario, senhaEnvio });
+    await salvarCredenciais({
+      usuario,
+      senhaEnvio,
+      token: json.dados?.token,
+      tokenExpiraEm: json.dados?.token_expira,
+      nomusu: json.dados?.nomusu ?? '',
+      nomregula: json.dados?.nomregula ?? '',
+      codreg: json.dados?.codreg != null ? String(json.dados.codreg) : undefined,
+    });
     await registrarVerificacaoPeriodica();
 
     const sinistrosResposta: { id_sinistro: number }[] = Array.isArray(json.dados_sini) ? json.dados_sini : [];
@@ -161,4 +171,23 @@ export async function sincronizarComCredenciaisSalvas(): Promise<LoginResult> {
     return { success: false, message: 'Nenhuma sessão salva. Faça login novamente.' };
   }
   return autenticarEImportar(credenciais.usuario, credenciais.senhaEnvio);
+}
+
+/**
+ * Revoga o token de sessão de 24h no servidor ao sair (ver logout_sessao.php) — best-effort:
+ * o "Sair" do app não deve travar nem falhar por causa disso, já que `limparCredenciais()` já
+ * torna a sessão inutilizável localmente de qualquer forma.
+ */
+export async function encerrarSessaoServidor(): Promise<void> {
+  const credenciais = await lerCredenciais();
+  if (!credenciais?.token) return;
+  try {
+    await fetch(LOGOUT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=ISO-8859-1' },
+      body: new URLSearchParams({ token: credenciais.token }).toString(),
+    });
+  } catch {
+    // best-effort — sem sessão salva localmente, o token vencido em até 24h de qualquer forma
+  }
 }

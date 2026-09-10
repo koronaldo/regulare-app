@@ -32,6 +32,7 @@ async function enviarVideo(
   video: VideoResumo,
   usuario: string,
   senha: string,
+  token: string | undefined,
 ): Promise<{ sucesso: boolean; mensagem: string }> {
   let arquivoEnvio: ArquivoParaEnvio | null = null;
   try {
@@ -46,6 +47,7 @@ async function enviarVideo(
       parameters: {
         usuario,
         senha,
+        ...(token ? { token } : {}),
         id_sinistro: String(idSinistro),
         id_video: String(video.id_video),
         legenda: video.legenda,
@@ -102,7 +104,7 @@ export async function transferirVideos(idSinistro: number): Promise<ResultadoTra
   const falhas: string[] = [];
 
   for (const video of videos) {
-    const resultado = await enviarVideo(idSinistro, video, credenciais.usuario, credenciais.senhaEnvio);
+    const resultado = await enviarVideo(idSinistro, video, credenciais.usuario, credenciais.senhaEnvio, credenciais.token);
     if (resultado.sucesso) {
       enviados++;
       await marcarVideoEnviado(video.id_video);
@@ -133,7 +135,7 @@ export async function transferirVideoUnico(idSinistro: number, idVideo: number):
     return { sucesso: false, mensagem: 'Vídeo não encontrado.' };
   }
 
-  const resultado = await enviarVideo(idSinistro, video, credenciais.usuario, credenciais.senhaEnvio);
+  const resultado = await enviarVideo(idSinistro, video, credenciais.usuario, credenciais.senhaEnvio, credenciais.token);
   if (resultado.sucesso) {
     await marcarVideoEnviado(video.id_video);
     return { sucesso: true, mensagem: 'Vídeo enviado com sucesso.' };

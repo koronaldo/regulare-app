@@ -20,7 +20,7 @@ import ReanimatedSwipeable from 'react-native-gesture-handler/ReanimatedSwipeabl
 
 import { cancelarVerificacaoPeriodica } from '../src/services/backgroundSync';
 import { limparCredenciais } from '../src/services/credenciais';
-import { sincronizarComCredenciaisSalvas } from '../src/services/auth';
+import { encerrarSessaoServidor, sincronizarComCredenciaisSalvas } from '../src/services/auth';
 import { contarSinistros, listarSinistros, type SinistroResumo, type SituacaoSinistro } from '../src/db/sinistros';
 import { excluirSinistroCompleto, limparTodosOsProcessos } from '../src/db/excluirSinistro';
 
@@ -133,6 +133,7 @@ export default function DashboardScreen() {
 
   function sair() {
     setMenuVisivel(false);
+    encerrarSessaoServidor(); // best-effort, não bloqueia o logout local
     limparCredenciais();
     cancelarVerificacaoPeriodica();
     router.replace('/login');

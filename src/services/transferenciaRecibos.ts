@@ -18,6 +18,7 @@ async function enviarRecibo(
   recibo: ReciboParaTransferencia,
   usuario: string,
   senha: string,
+  token: string | undefined,
 ): Promise<{ sucesso: boolean; mensagem: string }> {
   let pdfGerado: string | null = null;
   try {
@@ -31,6 +32,7 @@ async function enviarRecibo(
       parameters: {
         usuario,
         senha,
+        ...(token ? { token } : {}),
         id_sinistro: String(idSinistro),
         id_sinidesp: String(recibo.id_sinidesp),
         nm_despesa: recibo.nm_despesa,
@@ -90,7 +92,7 @@ export async function transferirRecibos(idSinistro: number): Promise<ResultadoTr
   const falhas: string[] = [];
 
   for (const recibo of recibos) {
-    const resultado = await enviarRecibo(idSinistro, recibo, credenciais.usuario, credenciais.senhaEnvio);
+    const resultado = await enviarRecibo(idSinistro, recibo, credenciais.usuario, credenciais.senhaEnvio, credenciais.token);
     if (resultado.sucesso) {
       enviados++;
       await marcarReciboEnviado(recibo.id_sinidesp);
@@ -121,7 +123,7 @@ export async function transferirReciboUnico(idSinistro: number, idSinidesp: numb
     return { sucesso: false, mensagem: 'Comprovante não encontrado.' };
   }
 
-  const resultado = await enviarRecibo(idSinistro, recibo, credenciais.usuario, credenciais.senhaEnvio);
+  const resultado = await enviarRecibo(idSinistro, recibo, credenciais.usuario, credenciais.senhaEnvio, credenciais.token);
   if (resultado.sucesso) {
     await marcarReciboEnviado(recibo.id_sinidesp);
     return { sucesso: true, mensagem: 'Comprovante enviado com sucesso.' };
