@@ -21,6 +21,7 @@ import {
   ID_TIPOTRANS_QUESTIONARIO,
   ID_TIPOTRANS_RECIBOS,
   ID_TIPOTRANS_VIDEOS,
+  idsTiposTransferenciaComDados,
   informacoesCompletas,
   listarStatusTransferencia,
   type ItemTransferencia,
@@ -50,6 +51,7 @@ export default function TransferenciaScreen() {
   const [carregando, setCarregando] = useState(true);
   const [cabecalho, setCabecalho] = useState({ segurado: '', sinistro: '' });
   const [itens, setItens] = useState<ItemTransferencia[]>([]);
+  const [comDados, setComDados] = useState<Set<number>>(new Set());
   const [informacoesOk, setInformacoesOk] = useState(true);
   const [selecionados, setSelecionados] = useState<Set<number>>(new Set());
   const [transferindo, setTransferindo] = useState(false);
@@ -64,16 +66,25 @@ export default function TransferenciaScreen() {
       async function carregar() {
         setCarregando(true);
         try {
-          const [sinistro, lista, completas] = await Promise.all([
+          const [sinistro, lista, completas, tiposComDados] = await Promise.all([
             buscarSinistroPorId(idSinistro),
             listarStatusTransferencia(idSinistro),
             informacoesCompletas(idSinistro),
+            idsTiposTransferenciaComDados(idSinistro),
           ]);
           if (cancelado) return;
           if (sinistro) setCabecalho({ segurado: sinistro.nm_segurado ?? '', sinistro: sinistro.nro_sinistro ?? '' });
           setItens(lista);
+          setComDados(tiposComDados);
           setInformacoesOk(completas);
-          setSelecionados(new Set(lista.filter((item) => item.status_trans !== 'S').map((item) => item.id_tipotrans)));
+          // Seções sem dado ficam desabilitadas (não selecionáveis), não somem da lista.
+          setSelecionados(
+            new Set(
+              lista
+                .filter((item) => item.status_trans !== 'S' && tiposComDados.has(item.id_tipotrans))
+                .map((item) => item.id_tipotrans),
+            ),
+          );
         } finally {
           if (!cancelado) setCarregando(false);
         }
@@ -165,7 +176,11 @@ export default function TransferenciaScreen() {
 
       const lista = await listarStatusTransferencia(idSinistro);
       setItens(lista);
-      setSelecionados(new Set(lista.filter((item) => item.status_trans !== 'S').map((item) => item.id_tipotrans)));
+      setSelecionados(
+        new Set(
+          lista.filter((item) => item.status_trans !== 'S' && comDados.has(item.id_tipotrans)).map((item) => item.id_tipotrans),
+        ),
+      );
 
       if (sucessos > 0) {
         await registrarLog(idSinistro, 'Transferido para servidor');
@@ -217,30 +232,31 @@ export default function TransferenciaScreen() {
         <Text style={styles.instrucao}>Selecione os itens e toque em Transferir</Text>
 
         {itens.map((item) => {
+          const semDados = !comDados.has(item.id_tipotrans);
           const selecionado = selecionados.has(item.id_tipotrans);
           const enviandoEste = itemAtual === item.id_tipotrans;
           const status = statusVisual(item);
           const obrigatorio = item.id_tipotrans === ID_TIPOTRANS_INFORMACOES && !informacoesOk;
           return (
-            <View key={item.id_tipotrans} style={styles.linha}>
+            <View key={item.id_tipotrans} style={[styles.linha, semDados && styles.linhaDesabilitada]}>
               <Switch
                 value={selecionado}
                 onValueChange={() => alternarSelecao(item.id_tipotrans)}
                 trackColor={{ true: '#1c3d5a' }}
-                disabled={transferindo}
+                disabled={transferindo || semDados}
               />
               <View style={styles.linhaTexto}>
                 <Text style={styles.linhaLabel}>{item.nm_tipotrans}</Text>
                 {obrigatorio && <Text style={styles.linhaObrigatorio}>Obrigatório</Text>}
               </View>
               <View style={styles.linhaStatus}>
-                {enviandoEste ? (
+                {semDados ? null : enviandoEste ? (
                   <ActivityIndicator size="small" color="#1c3d5a" />
                 ) : (
                   <Ionicons name={status.icone} size={18} color={status.cor} />
                 )}
-                <Text style={[styles.linhaStatusTexto, { color: enviandoEste ? '#1c3d5a' : status.cor }]}>
-                  {enviandoEste ? 'Enviando' : status.texto}
+                <Text style={[styles.linhaStatusTexto, { color: semDados ? '#b0b8bf' : enviandoEste ? '#1c3d5a' : status.cor }]}>
+                  {semDados ? 'Sem dados' : enviandoEste ? 'Enviando' : status.texto}
                 </Text>
               </View>
             </View>
@@ -341,6 +357,9 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.05,
     shadowRadius: 3,
     shadowOffset: { width: 0, height: 1 },
+  },
+  linhaDesabilitada: {
+    opacity: 0.5,
   },
   linhaTexto: {
     flex: 1,

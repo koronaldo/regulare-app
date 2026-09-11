@@ -96,6 +96,77 @@ export async function informacoesCompletas(idSinistro: number): Promise<boolean>
 }
 
 /**
+ * Mesma condição de CONDICAO_E_ATA em documentos.ts: distingue anexo comum de Ata/Termo assinado
+ * dentro de sinidocpdf (não tem coluna própria pra isso).
+ */
+const CONDICAO_E_ATA_SP = `exists (
+     select 1 from ataseg_doc ad
+     inner join sinimob sm on sm.id_sinistro = sp.id_sinistro
+     where ad.id_documento = sp.id_documento and ad.id_seguradora = sm.id_seguradora
+   )`;
+
+/**
+ * Quais id_tipotrans têm algum dado preenchido pra esse sinistro — usado pra tela de
+ * Transferência não listar seções vazias (Cadastro e Informações Gerais sempre entram, são a
+ * base do processo e não dependem de nenhuma tabela filha).
+ */
+export async function idsTiposTransferenciaComDados(idSinistro: number): Promise<Set<number>> {
+  const db = await getDb();
+
+  const row = await db.getFirstAsync<{
+    relato: number;
+    constatacoes: number;
+    coberturas: number;
+    beneficiarios: number;
+    planilha: number;
+    outroseg: number;
+    fotos: number;
+    documentos: number;
+    atas: number;
+    videos: number;
+    benfeitorias: number;
+    questionario: number;
+    recibos: number;
+  }>(
+    `select
+       (select count(*) from sinitextomob where id_sinistro = ? and id_texto = 4 and resposta is not null and resposta <> '') as relato,
+       (select count(*) from sinitextomob where id_sinistro = ? and id_texto = 5 and resposta is not null and resposta <> '') as constatacoes,
+       (select count(*) from sinimobcob where id_sinistro = ?) as coberturas,
+       (select count(*) from sinicobbeni where id_sinistro = ?) as beneficiarios,
+       (select count(*) from planilha_apuracao where id_sinistro = ?) as planilha,
+       (select count(*) from sinimobcob_outro where id_sinistro = ?) as outroseg,
+       (select count(*) from sinifotoapp where id_sinistro = ?) as fotos,
+       ((select count(*) from sinidocpag sp where sp.id_sinistro = ? and sp.grupopag <> 'PDF') +
+        (select count(*) from sinidocpdf sp where sp.id_sinistro = ? and not ${CONDICAO_E_ATA_SP})) as documentos,
+       (select count(*) from sinidocpdf sp where sp.id_sinistro = ? and ${CONDICAO_E_ATA_SP}) as atas,
+       (select count(*) from sinivideoapp where id_sinistro = ?) as videos,
+       (select count(*) from sinibenfe where id_sinistro = ?) as benfeitorias,
+       (select count(*) from sini_prod where id_sinistro = ?) as questionario,
+       (select count(*) from sinidesp_iti where id_sinistro = ? and nome_recibo is not null and nome_recibo <> '') as recibos`,
+    Array(14).fill(idSinistro),
+  );
+
+  const comDados = new Set<number>([ID_TIPOTRANS_CADASTRO, ID_TIPOTRANS_INFORMACOES]);
+  if (!row) return comDados;
+
+  if (row.relato > 0) comDados.add(ID_TIPOTRANS_RELATO);
+  if (row.constatacoes > 0) comDados.add(ID_TIPOTRANS_CONSTATACOES);
+  if (row.coberturas > 0) comDados.add(ID_TIPOTRANS_COBERTURAS);
+  if (row.beneficiarios > 0) comDados.add(ID_TIPOTRANS_BENEFICIARIOS);
+  if (row.planilha > 0) comDados.add(ID_TIPOTRANS_PLANILHA);
+  if (row.outroseg > 0) comDados.add(ID_TIPOTRANS_OUTROSEG);
+  if (row.fotos > 0) comDados.add(ID_TIPOTRANS_FOTOS);
+  if (row.documentos > 0) comDados.add(ID_TIPOTRANS_DOCUMENTOS);
+  if (row.atas > 0) comDados.add(ID_TIPOTRANS_ATAS);
+  if (row.videos > 0) comDados.add(ID_TIPOTRANS_VIDEOS);
+  if (row.benfeitorias > 0) comDados.add(ID_TIPOTRANS_BENFEITORIAS);
+  if (row.questionario > 0) comDados.add(ID_TIPOTRANS_QUESTIONARIO);
+  if (row.recibos > 0) comDados.add(ID_TIPOTRANS_RECIBOS);
+
+  return comDados;
+}
+
+/**
  * Porta de InicializaBotoes/VerificandoTopicos (transfere_sinistro_def_screen.js): garante uma
  * linha de status por tipo de transferência (criando como pendente as que faltarem) e devolve a
  * lista completa, na ordem cadastrada.
