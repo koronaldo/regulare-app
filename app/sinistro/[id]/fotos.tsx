@@ -36,6 +36,8 @@ import {
   renomearFoto,
   type FotoResumo,
   type LegendaFoto,
+  legendaPedeComplemento,
+  normalizarTipoLegenda,
 } from '../../../src/db/fotos';
 import { buscarSinistroPorId } from '../../../src/db/sinistros';
 import { transferirFotoUnica } from '../../../src/services/transferenciaFotos';
@@ -197,8 +199,8 @@ export default function FotosScreen() {
       legendaForcada ?? legendas.find((l) => String(l.id_legendaf) === idLegendaSelecionada);
     if (!legenda) return;
 
-    if (legenda.tipo_leg === 'FX') {
-      // Legenda fixa: grava direto com o nome dela, sem pedir complemento.
+    if (!legendaPedeComplemento(legenda.tipo_leg)) {
+      // Legenda fixa (FX, ou qualquer valor que não seja FC/SC): grava direto com o nome dela.
       await finalizarFoto(asset.uri, asset.width, asset.height, legenda.nm_legendaf);
     } else {
       setComplemento({
@@ -249,7 +251,7 @@ export default function FotosScreen() {
       return;
     }
     const legendaFinal =
-      complemento.legenda.tipo_leg === 'FC'
+      normalizarTipoLegenda(complemento.legenda.tipo_leg) === 'FC'
         ? `${complemento.legenda.nm_legendaf} - ${complemento.texto.trim()}`
         : complemento.texto.trim();
     const { uri, largura, altura } = complemento;
@@ -575,6 +577,30 @@ export default function FotosScreen() {
                         { width: tamanhoMiniatura, height: tamanhoMiniatura + 24 },
                       ]}
                       hoverDraggingStyle={styles.celulaGradeArrastando}
+                      renderHoverContent={({ dimensions }) => (
+                        // Cópia da foto que acompanha o dedo durante o arraste: tamanho explícito
+                        // (senão a miniatura com width '100%' pode colapsar e sumir) e borda de destaque.
+                        <View
+                          style={[
+                            styles.celulaGrade,
+                            styles.celulaGradeHover,
+                            {
+                              width: dimensions?.width ?? tamanhoMiniatura,
+                              height: dimensions?.height ?? tamanhoMiniatura + 24,
+                              margin: 0,
+                            },
+                          ]}
+                        >
+                          <Image
+                            source={{ uri: item.arquivo }}
+                            style={{ width: '100%', height: tamanhoMiniatura - 6 }}
+                            resizeMode="cover"
+                          />
+                          <Text style={styles.miniaturaLegenda} numberOfLines={1}>
+                            {item.legenda || '...'}
+                          </Text>
+                        </View>
+                      )}
                     >
                       <Pressable
                         style={styles.celulaGradeConteudo}
@@ -843,6 +869,11 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 10,
     elevation: 6,
+  },
+  celulaGradeHover: {
+    borderWidth: 3,
+    borderColor: '#e8b93a',
+    backgroundColor: '#fffbeb',
   },
   celulaGradeConteudo: {
     flex: 1,

@@ -21,11 +21,20 @@ import * as Location from 'expo-location';
 
 import { listarSinistrosParaRoteiro, type SinistroRoteiro } from '../src/db/sinistros';
 import { mostrarAlerta } from '../src/utils/alerta';
-import { montarUrlGoogleMaps, type Coordenada } from '../src/utils/rota';
+import {
+  coordenadaDeTexto,
+  distanciaKm,
+  montarUrlGoogleMaps,
+  type Coordenada,
+  type ParadaRoteiro,
+} from '../src/utils/rota';
 import { MapaRoteiro, type PontoRoteiro } from '../src/components/MapaRoteiro';
 
-/** A lista arrastável exige altura fixa por item — dimensionada pra caber 3 linhas de endereço. */
-const ALTURA_ITEM = 118;
+/**
+ * A lista arrastável exige altura fixa por item. Etiqueta compacta (nome, sinistro e endereço em
+ * uma linha cada) pra caber mais itens na tela e o arraste não precisar rolar tanto.
+ */
+const ALTURA_ITEM = 72;
 
 function enderecoCompleto(item: SinistroRoteiro): string {
   const partes = [
@@ -35,6 +44,51 @@ function enderecoCompleto(item: SinistroRoteiro): string {
     item.nm_cidade && item.id_estado ? `${item.nm_cidade} - ${item.id_estado}` : item.nm_cidade,
   ];
   return partes.filter((p) => p && p.trim()).join(', ');
+}
+
+/** Raio máximo (km) entre o ponto geocodificado e o centro da cidade do processo. */
+const RAIO_MAXIMO_CIDADE_KM = 40;
+
+/**
+ * Endereço no formato que os geocoders entendem melhor ("Rua X, 123 - Bairro, Cidade - UF, CEP,
+ * Brasil"). Sem o país, o geocoder pode achar uma rua homônima em outra cidade/país.
+ */
+function enderecoParaBusca(item: SinistroRoteiro, incluirNumero = true): string {
+  const rua = [item.endereco?.trim(), incluirNumero ? item.nro_predio?.trim() : null]
+    .filter(Boolean)
+    .join(', ');
+  const ruaBairro = [rua, item.bairro?.trim()].filter(Boolean).join(' - ');
+  const cidade = [item.nm_cidade?.trim(), item.id_estado?.trim()].filter(Boolean).join(' - ');
+  return [ruaBairro, cidade, item.cep?.trim(), 'Brasil'].filter(Boolean).join(', ');
+}
+
+/** Coordenada já gravada no processo (tela Coordenadas), se houver. */
+function coordenadaGravada(item: SinistroRoteiro): Coordenada | null {
+  return coordenadaDeTexto(item.coorde_lat, item.coorde_log);
+}
+
+/**
+ * Geocodifica no aparelho só pra desenhar o mapa de prévia. Descarta resultados longe da cidade do
+ * processo (o geocoder do Android às vezes devolve rua homônima em outra cidade ou só o centro do
+ * CEP); se o endereço com número não der certo, tenta sem o número.
+ */
+async function geocodificarProcesso(item: SinistroRoteiro): Promise<Coordenada | null> {
+  const centro = coordenadaDeTexto(item.cidade_lat, item.cidade_lng);
+  const tentativas = [enderecoParaBusca(item, true), enderecoParaBusca(item, false)];
+
+  for (const endereco of new Set(tentativas)) {
+    if (!item.endereco?.trim() && !item.nm_cidade?.trim()) break;
+    try {
+      const resultados = await Location.geocodeAsync(endereco);
+      const valido = resultados.find(
+        (r) => !centro || distanciaKm(centro, r) <= RAIO_MAXIMO_CIDADE_KM,
+      );
+      if (valido) return { latitude: valido.latitude, longitude: valido.longitude };
+    } catch {
+      // tenta a próxima forma do endereço
+    }
+  }
+  return null;
 }
 
 /** Minúsculas e sem acentos, pra busca casar "São Paulo" com "sao paulo". */
@@ -120,18 +174,7 @@ export default function RoteirosScreen() {
       const pendente = selecionados.find((p) => !(p.id_sinistro in coordenadas));
       if (!pendente) return;
 
-      const endereco = enderecoCompleto(pendente);
-      let coord: Coordenada | null = null;
-      if (endereco) {
-        try {
-          const resultados = await Location.geocodeAsync(endereco);
-          if (resultados.length > 0) {
-            coord = { latitude: resultados[0].latitude, longitude: resultados[0].longitude };
-          }
-        } catch {
-          coord = null;
-        }
-      }
+      const coord = coordenadaGravada(pendente) ?? (await geocodificarProcesso(pendente));
       if (cancelado) return;
       setCoordenadas((atual) => ({ ...atual, [pendente.id_sinistro]: coord }));
     }
@@ -166,6 +209,14 @@ export default function RoteirosScreen() {
     numColumns: 1,
     keyExtractor: (item) => String(item.id_sinistro),
     onReorder: ({ data }) => setIdsSelecionados(data.map((d) => d.id_sinistro)),
+    // Só sobe/desce: evita o item "escapar" pros lados e facilita soltar na posição certa.
+    lockToMainAxis: true,
+    longPressDelay: 200,
+    // Rola a lista mais cedo quando o dedo chega perto da borda, em passos menores.
+    autoScrollBackThreshold: 0.15,
+    autoScrollForwardThreshold: 0.85,
+    autoScrollJumpRatio: 0.12,
+    inactiveItemStyle: { opacity: 0.6 },
   });
 
   function selecionar(idSinistro: number) {
@@ -197,15 +248,20 @@ export default function RoteirosScreen() {
         }
       }
 
-      const pontos: Coordenada[] = [];
+      const pontos: ParadaRoteiro[] = [];
       const falhas: string[] = [];
 
       // Respeita a ordem em que os processos foram arrastados/selecionados — sem reordenar por
-      // distância. As coordenadas já foram resolvidas ao selecionar (cache), então aqui é só ler.
+      // distância. Pro Google Maps vai a coordenada gravada no processo (exata) ou, na falta dela,
+      // o endereço em texto: quem localiza é o próprio Google, que acerta bem mais que o geocoder
+      // do aparelho. A geocodificação local serve só pro mapa de prévia.
       for (const item of selecionados) {
-        const coord = coordenadas[item.id_sinistro];
+        const coord = coordenadaGravada(item);
+        const temEndereco = !!item.endereco?.trim() && !!item.nm_cidade?.trim();
         if (coord) {
           pontos.push(coord);
+        } else if (temEndereco) {
+          pontos.push(enderecoParaBusca(item));
         } else {
           falhas.push(
             item.nm_segurado ||
@@ -218,15 +274,8 @@ export default function RoteirosScreen() {
 
       if (pontos.length === 0) {
         mostrarAlerta(
-          'Endereço não localizado',
-          'Não foi possível localizar nenhum dos endereços selecionados.',
-        );
-        return;
-      }
-      if (!origemAtual && pontos.length < 2) {
-        mostrarAlerta(
-          'Localização necessária',
-          'Sem acesso à localização atual, selecione ao menos 2 processos para montar o roteiro.',
+          'Endereço incompleto',
+          'Nenhum dos processos selecionados tem endereço (rua e cidade) cadastrado.',
         );
         return;
       }
@@ -234,7 +283,7 @@ export default function RoteirosScreen() {
       const url = montarUrlGoogleMaps(origemAtual, pontos);
 
       if (falhas.length > 0) {
-        mostrarAlerta('Alguns endereços não foram localizados', falhas.join(', '), [
+        mostrarAlerta('Processos sem endereço ficaram fora do roteiro', falhas.join(', '), [
           { text: 'OK', onPress: () => Linking.openURL(url) },
         ]);
       } else {
@@ -331,18 +380,23 @@ export default function RoteirosScreen() {
                   </>
                 }
                 renderItem={({ item, index }) => (
-                  <SortableItem sortable={sortable} index={index} style={styles.itemArrastavel}>
+                  <SortableItem
+                    sortable={sortable}
+                    index={index}
+                    style={styles.itemArrastavel}
+                    hoverDraggingStyle={styles.itemArrastando}
+                  >
                     <View style={[styles.card, styles.cardSelecionado]}>
-                      <Ionicons name="reorder-three-outline" size={20} color="#8a97a3" />
+                      <Ionicons name="reorder-three-outline" size={22} color="#1c3d5a" />
                       <Text style={styles.numeroOrdem}>{index + 1}</Text>
                       <View style={styles.cardTexto}>
-                        <Text style={styles.cardSegurado} numberOfLines={1}>
+                        <Text style={styles.cardSeguradoCompacto} numberOfLines={1}>
                           {item.nm_segurado || 'Segurado não informado'}
                         </Text>
-                        <Text style={styles.cardLinha} numberOfLines={1}>
+                        <Text style={styles.cardLinhaCompacta} numberOfLines={1}>
                           Sinistro <Text style={styles.cardDestaque}>{item.nro_sinistro}</Text>
                         </Text>
-                        <Text style={styles.cardEndereco} numberOfLines={3}>
+                        <Text style={styles.cardLinhaCompacta} numberOfLines={1}>
                           {enderecoCompleto(item) || 'Endereço não informado'}
                         </Text>
                       </View>
@@ -503,6 +557,28 @@ const styles = StyleSheet.create({
     height: ALTURA_ITEM,
     marginBottom: 8,
   },
+  itemArrastando: {
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: '#e8b93a',
+    transform: [{ scale: 1.03 }],
+    shadowColor: '#000',
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 8,
+  },
+  cardSeguradoCompacto: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#1c3d5a',
+    lineHeight: 18,
+  },
+  cardLinhaCompacta: {
+    fontSize: 11,
+    color: '#48545e',
+    lineHeight: 15,
+  },
   card: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -520,6 +596,10 @@ const styles = StyleSheet.create({
     borderColor: '#1c3d5a',
     backgroundColor: '#eef4f8',
     marginBottom: 0,
+    minHeight: 0,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    gap: 8,
     // A lista arrastável mede cada item por ALTURA_ITEM, então aqui a altura é fixa mesmo.
     height: ALTURA_ITEM - 8,
   },

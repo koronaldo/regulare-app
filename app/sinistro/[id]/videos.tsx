@@ -21,6 +21,7 @@ import {
   type LegendaVideo,
   type VideoResumo,
 } from '../../../src/db/videos';
+import { legendaPedeComplemento, normalizarTipoLegenda } from '../../../src/db/fotos';
 import { buscarSinistroPorId } from '../../../src/db/sinistros';
 import { transferirVideoUnico } from '../../../src/services/transferenciaVideos';
 import { mostrarAlerta } from '../../../src/utils/alerta';
@@ -176,7 +177,7 @@ export default function VideosScreen() {
     const legenda = legendas.find((l) => String(l.id_legendaf) === idLegendaSelecionada);
     if (!legenda) return;
 
-    if (legenda.tipo_leg === 'FX') {
+    if (!legendaPedeComplemento(legenda.tipo_leg)) {
       finalizarVideo(asset.uri, legenda.nm_legendaf);
     } else {
       setComplemento({ legenda, uri: asset.uri, texto: '' });
@@ -190,7 +191,7 @@ export default function VideosScreen() {
       return;
     }
     const legendaFinal =
-      complemento.legenda.tipo_leg === 'FC'
+      normalizarTipoLegenda(complemento.legenda.tipo_leg) === 'FC'
         ? `${complemento.legenda.nm_legendaf} ${complemento.texto.trim()}`
         : complemento.texto.trim();
     const { uri } = complemento;

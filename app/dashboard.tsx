@@ -22,14 +22,22 @@ import { cancelarVerificacaoPeriodica } from '../src/services/backgroundSync';
 import { limparCredenciais } from '../src/services/credenciais';
 import { encerrarSessaoServidor, sincronizarComCredenciaisSalvas } from '../src/services/auth';
 import {
+  contarSinistrosPorCidade,
   contarSinistrosPorSituacao,
   listarSinistros,
+  type CidadeContagem,
   type ContagemSituacoes,
+  type FiltroCidade,
   type SinistroResumo,
   type SituacaoSinistro,
 } from '../src/db/sinistros';
 import { excluirSinistroCompleto, limparTodosOsProcessos } from '../src/db/excluirSinistro';
 import { numeroWhatsApp, somenteDigitos } from '../src/utils/telefone';
+
+function rotuloCidade(c: FiltroCidade): string {
+  if (!c.nm_cidade && !c.id_estado) return 'Cidade não informada';
+  return c.id_estado ? `${c.nm_cidade || '-'}/${c.id_estado}` : c.nm_cidade;
+}
 
 const ABAS: { valor: SituacaoSinistro; label: string; icone: keyof typeof Ionicons.glyphMap }[] = [
   { valor: 'P', label: 'Pendentes', icone: 'time-outline' },
@@ -53,18 +61,21 @@ export default function DashboardScreen() {
   const [sincronizando, setSincronizando] = useState(false);
   const [expandido, setExpandido] = useState<number | null>(null);
   const [menuVisivel, setMenuVisivel] = useState(false);
+  const [filtroCidade, setFiltroCidade] = useState<FiltroCidade | null>(null);
+  const [filtroVisivel, setFiltroVisivel] = useState(false);
+  const [cidades, setCidades] = useState<CidadeContagem[]>([]);
 
   const codregNum = Number(codreg);
 
   const recarregarLista = useCallback(async () => {
     if (!codregNum) return;
     const [lista, totais] = await Promise.all([
-      listarSinistros(codregNum, situacao, busca),
+      listarSinistros(codregNum, situacao, busca, filtroCidade),
       contarSinistrosPorSituacao(codregNum),
     ]);
     setSinistros(lista);
     setContagens(totais);
-  }, [codregNum, situacao, busca]);
+  }, [codregNum, situacao, busca, filtroCidade]);
 
   useEffect(() => {
     if (!codregNum) return;
@@ -75,7 +86,7 @@ export default function DashboardScreen() {
       setCarregando(true);
       try {
         const [lista, totais] = await Promise.all([
-          listarSinistros(codregNum, situacao, busca),
+          listarSinistros(codregNum, situacao, busca, filtroCidade),
           contarSinistrosPorSituacao(codregNum),
         ]);
         if (!cancelado) {
@@ -92,7 +103,17 @@ export default function DashboardScreen() {
     return () => {
       cancelado = true;
     };
-  }, [codregNum, situacao, busca]);
+  }, [codregNum, situacao, busca, filtroCidade]);
+
+  async function abrirFiltroCidade() {
+    setCidades(await contarSinistrosPorCidade(codregNum, situacao));
+    setFiltroVisivel(true);
+  }
+
+  function selecionarCidade(cidade: FiltroCidade | null) {
+    setFiltroCidade(cidade);
+    setFiltroVisivel(false);
+  }
 
   async function sincronizarAgora() {
     setSincronizando(true);
@@ -183,6 +204,7 @@ export default function DashboardScreen() {
             await limparTodosOsProcessos();
             setSinistros([]);
             setContagens({ P: 0, A: 0, T: 0 });
+            setFiltroCidade(null);
             Alert.alert('Concluído', 'Todos os processos e logs foram removidos deste aparelho.');
           },
         },
@@ -298,7 +320,63 @@ export default function DashboardScreen() {
             <Ionicons name="close-circle" size={18} color="#8a97a3" />
           </Pressable>
         )}
+        <Pressable
+          onPress={abrirFiltroCidade}
+          hitSlop={10}
+          style={[styles.botaoFiltro, filtroCidade && styles.botaoFiltroAtivo]}
+        >
+          <Ionicons name={filtroCidade ? 'funnel' : 'funnel-outline'} size={18} color={filtroCidade ? '#fff' : '#1c3d5a'} />
+        </Pressable>
       </View>
+
+      {filtroCidade && (
+        <View style={styles.filtroChip}>
+          <Ionicons name="location-outline" size={14} color="#1c3d5a" />
+          <Text style={styles.filtroChipTexto} numberOfLines={1}>
+            {rotuloCidade(filtroCidade)}
+          </Text>
+          <Pressable onPress={() => setFiltroCidade(null)} hitSlop={10}>
+            <Ionicons name="close-circle" size={16} color="#1c3d5a" />
+          </Pressable>
+        </View>
+      )}
+
+      <Modal visible={filtroVisivel} transparent animationType="fade" onRequestClose={() => setFiltroVisivel(false)}>
+        <Pressable style={styles.filtroFundo} onPress={() => setFiltroVisivel(false)}>
+          <Pressable style={styles.filtroCard} onPress={() => {}}>
+            <Text style={styles.filtroTitulo}>Filtrar por cidade · {labelAba}</Text>
+            <FlatList
+              data={cidades}
+              keyExtractor={(c) => `${c.nm_cidade}|${c.id_estado}`}
+              ListHeaderComponent={
+                <Pressable
+                  style={[styles.filtroItem, !filtroCidade && styles.filtroItemAtivo]}
+                  onPress={() => selecionarCidade(null)}
+                >
+                  <Text style={[styles.filtroItemTexto, styles.filtroItemTextoDestaque]}>Todas as cidades</Text>
+                  <Text style={styles.filtroItemTotal}>{cidades.reduce((soma, c) => soma + c.total, 0)}</Text>
+                </Pressable>
+              }
+              ListEmptyComponent={<Text style={styles.vazioTexto}>Nenhum processo nesta aba.</Text>}
+              renderItem={({ item: c }) => {
+                const ativo =
+                  filtroCidade?.nm_cidade === c.nm_cidade && filtroCidade?.id_estado === c.id_estado;
+                return (
+                  <Pressable
+                    style={[styles.filtroItem, ativo && styles.filtroItemAtivo]}
+                    onPress={() => selecionarCidade({ nm_cidade: c.nm_cidade, id_estado: c.id_estado })}
+                  >
+                    <Text style={styles.filtroItemTexto} numberOfLines={1}>
+                      {rotuloCidade(c)}
+                    </Text>
+                    <Text style={styles.filtroItemTotal}>{c.total}</Text>
+                  </Pressable>
+                );
+              }}
+            />
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       {carregando ? (
         <View style={styles.centro}>
@@ -426,7 +504,9 @@ export default function DashboardScreen() {
 
       <View style={styles.footer}>
         <Text style={styles.footerTexto}>
-          ({contagens[situacao]}) {labelAba}
+          {filtroCidade
+            ? `(${sinistros.length}) ${labelAba} · ${rotuloCidade(filtroCidade)}`
+            : `(${contagens[situacao]}) ${labelAba}`}
         </Text>
       </View>
     </GestureHandlerRootView>
@@ -567,6 +647,86 @@ const styles = StyleSheet.create({
   buscaInput: {
     flex: 1,
     fontSize: 14,
+  },
+  botaoFiltro: {
+    padding: 6,
+    borderRadius: 8,
+    backgroundColor: '#eef2f5',
+  },
+  botaoFiltroAtivo: {
+    backgroundColor: '#1c3d5a',
+  },
+  filtroChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 6,
+    marginHorizontal: 16,
+    marginTop: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 14,
+    backgroundColor: '#e7edf3',
+    maxWidth: '90%',
+  },
+  filtroChipTexto: {
+    fontSize: 12,
+    color: '#1c3d5a',
+    fontWeight: '600',
+    flexShrink: 1,
+  },
+  filtroFundo: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  filtroCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    paddingVertical: 12,
+    maxHeight: '75%',
+  },
+  filtroTitulo: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#1c3d5a',
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+  },
+  filtroItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#eef1f4',
+    gap: 10,
+  },
+  filtroItemAtivo: {
+    backgroundColor: '#e7edf3',
+  },
+  filtroItemTexto: {
+    flex: 1,
+    fontSize: 14,
+    color: '#48545e',
+  },
+  filtroItemTextoDestaque: {
+    fontWeight: '700',
+    color: '#1c3d5a',
+  },
+  filtroItemTotal: {
+    minWidth: 28,
+    textAlign: 'center',
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#fff',
+    backgroundColor: '#1c3d5a',
+    borderRadius: 10,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    overflow: 'hidden',
   },
   lista: {
     padding: 16,

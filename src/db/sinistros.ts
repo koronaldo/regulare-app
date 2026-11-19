@@ -41,16 +41,25 @@ export interface SinistroRoteiro {
   cep: string | null;
   nm_cidade: string | null;
   id_estado: string | null;
+  /** Coordenadas já gravadas no processo (tela Coordenadas), quando existirem. */
+  coorde_lat: string | null;
+  coorde_log: string | null;
+  /** Centro da cidade do processo (tabela cidade) — usado pra validar a geocodificação. */
+  cidade_lat: string | null;
+  cidade_lng: string | null;
 }
 
 /** Porta da tela "Roteiros": só processos pendentes (sem data de vistoria), pra montar um trajeto. */
 export async function listarSinistrosParaRoteiro(codreg: number): Promise<SinistroRoteiro[]> {
   const db = await getDb();
   return db.getAllAsync<SinistroRoteiro>(
-    `select id_sinistro, nro_sinistro, nm_segurado, endereco, nro_predio, bairro, cep, nm_cidade, id_estado
-     from sinimob
-     where id_regulador = ? and data_vistoria is null
-     order by id_estado, nm_cidade, bairro, cep, endereco`,
+    `select mb.id_sinistro, mb.nro_sinistro, mb.nm_segurado, mb.endereco, mb.nro_predio, mb.bairro, mb.cep,
+       mb.nm_cidade, mb.id_estado, mb.coorde_lat, mb.coorde_log,
+       ci.latitude as cidade_lat, ci.longitude as cidade_lng
+     from sinimob mb
+     left join cidade ci on ci.id_cidade = mb.id_cidade
+     where mb.id_regulador = ? and mb.data_vistoria is null
+     order by mb.id_estado, mb.nm_cidade, mb.bairro, mb.cep, mb.endereco`,
     [codreg],
   );
 }
@@ -91,6 +100,7 @@ export async function listarSinistros(
   codreg: number,
   situacao: SituacaoSinistro,
   busca?: string,
+  cidade?: FiltroCidade | null,
 ): Promise<SinistroResumo[]> {
   const db = await getDb();
 
@@ -99,6 +109,11 @@ export async function listarSinistros(
 
   if (situacao === 'A') condicoes.push('mb.data_vistoria is not null');
   if (situacao === 'P') condicoes.push('mb.data_vistoria is null');
+
+  if (cidade) {
+    condicoes.push("coalesce(mb.nm_cidade, '') = ? and coalesce(mb.id_estado, '') = ?");
+    params.push(cidade.nm_cidade, cidade.id_estado);
+  }
 
   if (busca?.trim()) {
     condicoes.push('mb.nm_segurado like ?');
@@ -117,6 +132,36 @@ export async function listarSinistros(
   `;
 
   return db.getAllAsync<SinistroResumo>(sql, params);
+}
+
+/** Cidade/UF usada como filtro na lista de processos ('' quando o campo está vazio no banco). */
+export interface FiltroCidade {
+  nm_cidade: string;
+  id_estado: string;
+}
+
+export interface CidadeContagem extends FiltroCidade {
+  total: number;
+}
+
+/** Cidades/UF dos processos do regulador na situação informada, com o total de cada uma. */
+export async function contarSinistrosPorCidade(
+  codreg: number,
+  situacao: SituacaoSinistro,
+): Promise<CidadeContagem[]> {
+  const db = await getDb();
+  const condicoes = ['id_regulador = ?'];
+  if (situacao === 'A') condicoes.push('data_vistoria is not null');
+  if (situacao === 'P') condicoes.push('data_vistoria is null');
+
+  return db.getAllAsync<CidadeContagem>(
+    `select coalesce(nm_cidade, '') as nm_cidade, coalesce(id_estado, '') as id_estado, count(*) as total
+     from sinimob
+     where ${condicoes.join(' and ')}
+     group by coalesce(nm_cidade, ''), coalesce(id_estado, '')
+     order by coalesce(nm_cidade, '') = '', nm_cidade, id_estado`,
+    [codreg],
+  );
 }
 
 export type ContagemSituacoes = Record<SituacaoSinistro, number>;

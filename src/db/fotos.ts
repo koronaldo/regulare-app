@@ -1,6 +1,20 @@
 import { getDb } from './client';
 import { registrarLog } from './logs';
 
+/** tipo_leg vem do servidor sem tratamento (espaços, minúsculas, nulo): normaliza antes de comparar. */
+export function normalizarTipoLegenda(tipo: string | null | undefined): string {
+  return (tipo ?? '').trim().toUpperCase();
+}
+
+/**
+ * Só FC (Fixa + Complemento) e SC (Só Complemento) pedem texto complementar. Qualquer outro valor
+ * — FX, vazio ou desconhecido — é tratado como legenda fixa e gravado direto, sem perguntar nada.
+ */
+export function legendaPedeComplemento(tipo: string | null | undefined): boolean {
+  const t = normalizarTipoLegenda(tipo);
+  return t === 'FC' || t === 'SC';
+}
+
 export interface LegendaFoto {
   id_legendaf: number;
   nm_legendaf: string;

@@ -109,7 +109,8 @@ export default function RelatoScreen() {
         subtextos.map((s) => ({ id_mobile: s.id_mobile, resposta: respostas[s.id_mobile] ?? '' })),
       );
       setSujo(false);
-      avancar();
+      // Fica na mesma tela depois de salvar: só avança quando o usuário tocar em "Próximo".
+      mostrarAlerta('Sucesso', 'Atualizado com sucesso!!!');
     } catch {
       mostrarAlerta('Erro', 'Erro atualizando Relato segurado');
     } finally {
