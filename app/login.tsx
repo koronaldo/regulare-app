@@ -14,6 +14,7 @@ import {
 import { StatusBar } from 'expo-status-bar';
 import { router } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
 
 import { autenticarLegado } from '../src/services/auth';
 
@@ -31,6 +32,7 @@ const { width: LARGURA_TELA, height: ALTURA_TELA } = Dimensions.get('screen');
 export default function LoginScreen() {
   const [usuario, setUsuario] = useState('');
   const [senha, setSenha] = useState('');
+  const [mostrarSenha, setMostrarSenha] = useState(false);
   const [loading, setLoading] = useState(false);
   const [mensagem, setMensagem] = useState<Mensagem | null>(null);
 
@@ -99,17 +101,34 @@ export default function LoginScreen() {
           cursorColor="#ffffff"
           selectionColor="rgba(255,255,255,0.4)"
         />
-        <TextInput
-          style={styles.input}
-          placeholder="Senha"
-          placeholderTextColor="rgba(255,255,255,0.6)"
-          secureTextEntry
-          value={senha}
-          onChangeText={setSenha}
-          editable={!loading}
-          cursorColor="#ffffff"
-          selectionColor="rgba(255,255,255,0.4)"
-        />
+        <View style={styles.senhaContainer}>
+          <TextInput
+            style={[styles.input, styles.inputSenha]}
+            placeholder="Senha"
+            placeholderTextColor="rgba(255,255,255,0.6)"
+            secureTextEntry={!mostrarSenha}
+            autoCapitalize="none"
+            autoCorrect={false}
+            value={senha}
+            onChangeText={setSenha}
+            editable={!loading}
+            cursorColor="#ffffff"
+            selectionColor="rgba(255,255,255,0.4)"
+          />
+          <TouchableOpacity
+            style={styles.olhoBotao}
+            onPress={() => setMostrarSenha((v) => !v)}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            accessibilityRole="button"
+            accessibilityLabel={mostrarSenha ? 'Ocultar senha' : 'Mostrar senha'}
+          >
+            <Ionicons
+              name={mostrarSenha ? 'eye-off-outline' : 'eye-outline'}
+              size={22}
+              color="rgba(255,255,255,0.8)"
+            />
+          </TouchableOpacity>
+        </View>
 
         <TouchableOpacity style={styles.button} onPress={handleLogin} disabled={loading}>
           {loading ? (
@@ -179,6 +198,20 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#fff',
     marginBottom: 14,
+  },
+  senhaContainer: {
+    position: 'relative',
+    justifyContent: 'center',
+  },
+  inputSenha: {
+    paddingRight: 48,
+  },
+  olhoBotao: {
+    position: 'absolute',
+    right: 12,
+    top: 0,
+    bottom: 14,
+    justifyContent: 'center',
   },
   button: {
     backgroundColor: '#fff',

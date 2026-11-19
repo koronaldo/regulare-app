@@ -4,7 +4,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import * as Print from 'expo-print';
-import * as Sharing from 'expo-sharing';
 import { File } from 'expo-file-system';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -17,6 +16,7 @@ import {
 } from '../../../../src/db/atas';
 import { desvincularDocumentoSeVazio, excluirArquivo, listarArquivos } from '../../../../src/db/documentos';
 import { mostrarAlerta } from '../../../../src/utils/alerta';
+import { abrirDocumento } from '../../../../src/utils/abrirDocumento';
 import { transferirAtaIndividual } from '../../../../src/services/transferenciaDocumentos';
 import { calcularTamanhoPagina } from '../../../../src/utils/atasTemplate';
 
@@ -52,11 +52,7 @@ export default function AtaDetalheScreen() {
   );
 
   async function abrirPdf(uri: string) {
-    if (!(await Sharing.isAvailableAsync())) {
-      mostrarAlerta('Indisponível', 'Não é possível abrir arquivos neste dispositivo.');
-      return;
-    }
-    await Sharing.shareAsync(uri, { mimeType: 'application/pdf' });
+    await abrirDocumento(uri, 'application/pdf');
   }
 
   async function visualizarSemAssinatura() {
@@ -87,6 +83,8 @@ export default function AtaDetalheScreen() {
         return;
       }
       await abrirPdf(ultimo.nome_arquivo);
+    } catch (error) {
+      mostrarAlerta('Erro ao abrir o arquivo', error instanceof Error ? error.message : undefined);
     } finally {
       setProcessando(false);
     }

@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   FlatList,
   Image,
+  KeyboardAvoidingView,
   Platform,
   Pressable,
   StyleSheet,
@@ -40,7 +41,11 @@ import { buscarSinistroPorId } from '../../../src/db/sinistros';
 import { transferirFotoUnica } from '../../../src/services/transferenciaFotos';
 import { mostrarAlerta } from '../../../src/utils/alerta';
 import { reduzImagem } from '../../../src/utils/imagem';
-import { lerFotoPendente, limparFotoPendente, salvarFotoPendente } from '../../../src/services/fotoPendente';
+import {
+  lerFotoPendente,
+  limparFotoPendente,
+  salvarFotoPendente,
+} from '../../../src/services/fotoPendente';
 
 const NUM_COLUNAS_GRADE = 4;
 
@@ -188,7 +193,8 @@ export default function FotosScreen() {
   ) {
     if (resultado.canceled || !resultado.assets?.[0]) return;
     const asset = resultado.assets[0];
-    const legenda = legendaForcada ?? legendas.find((l) => String(l.id_legendaf) === idLegendaSelecionada);
+    const legenda =
+      legendaForcada ?? legendas.find((l) => String(l.id_legendaf) === idLegendaSelecionada);
     if (!legenda) return;
 
     if (legenda.tipo_leg === 'FX') {
@@ -294,10 +300,14 @@ export default function FotosScreen() {
 
   function enviarFotoIndividual(foto: FotoResumo) {
     if (foto.situacao === 'E') {
-      mostrarAlerta('Foto já enviada', 'Esta foto já foi enviada ao servidor antes. Deseja enviar novamente?', [
-        { text: 'Cancelar' },
-        { text: 'Enviar novamente', onPress: () => executarEnvioFoto(foto) },
-      ]);
+      mostrarAlerta(
+        'Foto já enviada',
+        'Esta foto já foi enviada ao servidor antes. Deseja enviar novamente?',
+        [
+          { text: 'Cancelar' },
+          { text: 'Enviar novamente', onPress: () => executarEnvioFoto(foto) },
+        ],
+      );
       return;
     }
     executarEnvioFoto(foto);
@@ -428,7 +438,12 @@ export default function FotosScreen() {
             <Ionicons name="grid-outline" size={22} color="#fff" />
           </Pressable>
           <Pressable
-            onPress={() => router.push({ pathname: '/sinistro/[id]/transferencia', params: { id: String(idSinistro) } })}
+            onPress={() =>
+              router.push({
+                pathname: '/sinistro/[id]/transferencia',
+                params: { id: String(idSinistro) },
+              })
+            }
             hitSlop={10}
             style={styles.botaoControle}
           >
@@ -436,265 +451,277 @@ export default function FotosScreen() {
           </Pressable>
         </View>
 
-        <View style={styles.segmentado}>
-          <Pressable
-            style={[styles.segmentoBotao, modo === 'slide' && styles.segmentoBotaoAtivo]}
-            onPress={() => setModo('slide')}
-          >
-            <Ionicons
-              name="images-outline"
-              size={16}
-              color={modo === 'slide' ? '#fff' : '#1c3d5a'}
-            />
-            <Text style={[styles.segmentoTexto, modo === 'slide' && styles.segmentoTextoAtivo]}>
-              Ver Fotos
-            </Text>
-          </Pressable>
-          <Pressable
-            style={[styles.segmentoBotao, modo === 'grade' && styles.segmentoBotaoAtivo]}
-            onPress={() => setModo('grade')}
-          >
-            <Ionicons name="grid-outline" size={16} color={modo === 'grade' ? '#fff' : '#1c3d5a'} />
-            <Text style={[styles.segmentoTexto, modo === 'grade' && styles.segmentoTextoAtivo]}>
-              Reordenar
-            </Text>
-          </Pressable>
-        </View>
-
-        <View style={styles.barraLegenda}>
-          <View style={styles.campoLegenda}>
-            <Selecao
-              label="Legenda"
-              valor={idLegendaSelecionada}
-              opcoes={opcoesLegenda}
-              onChange={setIdLegendaSelecionada}
-              obrigatorio
-            />
-          </View>
-          <Pressable
-            style={[styles.botaoCapturar, processando && styles.botaoDesabilitado]}
-            onPress={capturarDaCamera}
-            disabled={processando}
-          >
-            {processando ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Ionicons name="camera" size={22} color="#fff" />
-            )}
-          </Pressable>
-          <Pressable
-            style={[styles.botaoCapturar, processando && styles.botaoDesabilitado]}
-            onPress={escolherDaGaleria}
-            disabled={processando}
-          >
-            {processando ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Ionicons name="images" size={22} color="#fff" />
-            )}
-          </Pressable>
-        </View>
-
-        {complemento && (
-          <Secao titulo="Complemento da legenda" style={styles.secaoComplemento}>
-            <Campo
-              label={complemento.legenda.nm_legendaf}
-              obrigatorio
-              value={complemento.texto}
-              onChangeText={(v) =>
-                setComplemento((atual) => (atual ? { ...atual, texto: v } : atual))
-              }
-            />
-            <View style={styles.linhaBotoesForm}>
-              <Pressable style={styles.botaoCancelar} onPress={() => setComplemento(null)}>
-                <Text style={styles.botaoCancelarTexto}>Cancelar</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.botaoSalvar, styles.botaoSalvarForm]}
-                onPress={confirmarComplemento}
-              >
-                <Text style={styles.botaoSalvarTexto}>Confirmar</Text>
-              </Pressable>
-            </View>
-          </Secao>
-        )}
-
-        {!complemento && modo === 'grade' && (
-          <>
-            {fotos.length > 0 && (
-              <Text style={styles.dicaGrade}>
-                Toque e segure numa foto para arrastar e soltar em qualquer posição.
-              </Text>
-            )}
-            <SortableContainer
-              sortable={sortable}
-              scrollRef={listaGradeRef}
-              style={styles.gradeContainer}
+        <KeyboardAvoidingView
+          style={styles.flex1}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+          <View style={styles.segmentado}>
+            <Pressable
+              style={[styles.segmentoBotao, modo === 'slide' && styles.segmentoBotaoAtivo]}
+              onPress={() => setModo('slide')}
             >
-              <FlatList
-                ref={listaGradeRef}
-                data={sortable.data}
-                numColumns={NUM_COLUNAS_GRADE}
-                keyExtractor={sortable.stableKeyExtractor}
-                onScroll={sortable.onScroll}
-                onContentSizeChange={sortable.onContentSizeChange}
-                scrollEventThrottle={16}
-                contentContainerStyle={styles.gradeConteudo}
-                ListEmptyComponent={
-                  <Text style={styles.vazioTexto}>Nenhuma foto registrada!!!</Text>
-                }
-                renderItem={({ item, index }) => (
-                  <SortableItem
-                    sortable={sortable}
-                    index={index}
-                    style={[
-                      styles.celulaGrade,
-                      { width: tamanhoMiniatura, height: tamanhoMiniatura + 24 },
-                    ]}
-                    hoverDraggingStyle={styles.celulaGradeArrastando}
-                  >
-                    <Pressable
-                      style={styles.celulaGradeConteudo}
-                      onPress={() => abrirNaGrade(item)}
-                    >
-                      <Image
-                        source={{ uri: item.arquivo }}
-                        style={[styles.miniatura, { height: tamanhoMiniatura }]}
-                      />
-                      <Text style={styles.miniaturaLegenda} numberOfLines={1}>
-                        {item.legenda || '...'}
-                      </Text>
-                    </Pressable>
-                  </SortableItem>
-                )}
+              <Ionicons
+                name="images-outline"
+                size={16}
+                color={modo === 'slide' ? '#fff' : '#1c3d5a'}
               />
-            </SortableContainer>
-          </>
-        )}
+              <Text style={[styles.segmentoTexto, modo === 'slide' && styles.segmentoTextoAtivo]}>
+                Ver Fotos
+              </Text>
+            </Pressable>
+            <Pressable
+              style={[styles.segmentoBotao, modo === 'grade' && styles.segmentoBotaoAtivo]}
+              onPress={() => setModo('grade')}
+            >
+              <Ionicons
+                name="grid-outline"
+                size={16}
+                color={modo === 'grade' ? '#fff' : '#1c3d5a'}
+              />
+              <Text style={[styles.segmentoTexto, modo === 'grade' && styles.segmentoTextoAtivo]}>
+                Reordenar
+              </Text>
+            </Pressable>
+          </View>
 
-        {!complemento && modo === 'slide' && (
-          <View style={styles.slideContainer}>
-            {fotoAtual ? (
-              <>
-                <Text style={styles.contador}>
-                  {indiceAtual + 1}/{fotos.length} ·{' '}
-                  {fotoAtual.situacao === 'E' ? 'Enviada' : 'Não enviada'}
+          <View style={styles.barraLegenda}>
+            <View style={styles.campoLegenda}>
+              <Selecao
+                label="Legenda"
+                valor={idLegendaSelecionada}
+                opcoes={opcoesLegenda}
+                onChange={setIdLegendaSelecionada}
+                obrigatorio
+              />
+            </View>
+            <Pressable
+              style={[styles.botaoCapturar, processando && styles.botaoDesabilitado]}
+              onPress={capturarDaCamera}
+              disabled={processando}
+            >
+              {processando ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Ionicons name="camera" size={22} color="#fff" />
+              )}
+            </Pressable>
+            <Pressable
+              style={[styles.botaoCapturar, processando && styles.botaoDesabilitado]}
+              onPress={escolherDaGaleria}
+              disabled={processando}
+            >
+              {processando ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Ionicons name="images" size={22} color="#fff" />
+              )}
+            </Pressable>
+          </View>
+
+          {complemento && (
+            <Secao titulo="Complemento da legenda" style={styles.secaoComplemento}>
+              <Campo
+                label={complemento.legenda.nm_legendaf}
+                obrigatorio
+                value={complemento.texto}
+                onChangeText={(v) =>
+                  setComplemento((atual) => (atual ? { ...atual, texto: v } : atual))
+                }
+              />
+              <View style={styles.linhaBotoesForm}>
+                <Pressable style={styles.botaoCancelar} onPress={() => setComplemento(null)}>
+                  <Text style={styles.botaoCancelarTexto}>Cancelar</Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.botaoSalvar, styles.botaoSalvarForm]}
+                  onPress={confirmarComplemento}
+                >
+                  <Text style={styles.botaoSalvarTexto}>Confirmar</Text>
+                </Pressable>
+              </View>
+            </Secao>
+          )}
+
+          {!complemento && modo === 'grade' && (
+            <>
+              {fotos.length > 0 && (
+                <Text style={styles.dicaGrade}>
+                  Toque e segure numa foto para arrastar e soltar em qualquer posição.
                 </Text>
+              )}
+              <SortableContainer
+                sortable={sortable}
+                scrollRef={listaGradeRef}
+                style={styles.gradeContainer}
+              >
                 <FlatList
-                  ref={listaSlideRef}
-                  data={fotos}
-                  horizontal
-                  pagingEnabled
-                  showsHorizontalScrollIndicator={false}
-                  keyExtractor={(item) => String(item.id_foto)}
-                  style={styles.listaSlide}
-                  getItemLayout={(_, index) => ({
-                    length: larguraPagina,
-                    offset: larguraPagina * index,
-                    index,
-                  })}
-                  initialScrollIndex={indiceAtual}
-                  onMomentumScrollEnd={aoRolarSlide}
-                  onScrollToIndexFailed={(info) =>
-                    listaSlideRef.current?.scrollToOffset({
-                      offset: info.averageItemLength * info.index,
-                      animated: false,
-                    })
+                  ref={listaGradeRef}
+                  data={sortable.data}
+                  numColumns={NUM_COLUNAS_GRADE}
+                  keyExtractor={sortable.stableKeyExtractor}
+                  onScroll={sortable.onScroll}
+                  onContentSizeChange={sortable.onContentSizeChange}
+                  scrollEventThrottle={16}
+                  contentContainerStyle={styles.gradeConteudo}
+                  ListEmptyComponent={
+                    <Text style={styles.vazioTexto}>Nenhuma foto registrada!!!</Text>
                   }
-                  renderItem={({ item }) => (
-                    <View style={{ width: larguraPagina, flex: 1 }}>
-                      <Image
-                        source={{ uri: item.arquivo }}
-                        style={styles.imagemSlide}
-                        resizeMode="contain"
-                      />
-                    </View>
+                  renderItem={({ item, index }) => (
+                    <SortableItem
+                      sortable={sortable}
+                      index={index}
+                      style={[
+                        styles.celulaGrade,
+                        { width: tamanhoMiniatura, height: tamanhoMiniatura + 24 },
+                      ]}
+                      hoverDraggingStyle={styles.celulaGradeArrastando}
+                    >
+                      <Pressable
+                        style={styles.celulaGradeConteudo}
+                        onPress={() => abrirNaGrade(item)}
+                      >
+                        <Image
+                          source={{ uri: item.arquivo }}
+                          style={[styles.miniatura, { height: tamanhoMiniatura }]}
+                        />
+                        <Text style={styles.miniaturaLegenda} numberOfLines={1}>
+                          {item.legenda || '...'}
+                        </Text>
+                      </Pressable>
+                    </SortableItem>
                   )}
                 />
+              </SortableContainer>
+            </>
+          )}
 
-                {renomeando !== null ? (
-                  <View style={styles.linhaRenomear}>
-                    <Campo label="Legenda" value={renomeando} onChangeText={setRenomeando} />
-                    <View style={styles.linhaBotoesForm}>
-                      <Pressable style={styles.botaoCancelar} onPress={() => setRenomeando(null)}>
-                        <Text style={styles.botaoCancelarTexto}>Cancelar</Text>
-                      </Pressable>
-                      <Pressable
-                        style={[styles.botaoSalvar, styles.botaoSalvarForm]}
-                        onPress={confirmarRenomear}
-                      >
-                        <Text style={styles.botaoSalvarTexto}>Salvar Legenda</Text>
-                      </Pressable>
-                    </View>
-                  </View>
-                ) : (
-                  <Pressable onPress={() => setRenomeando(fotoAtual.legenda)}>
-                    <Text style={styles.legendaTexto}>{fotoAtual.legenda || '...'}</Text>
-                  </Pressable>
-                )}
-
-                <View style={styles.acoesSlide}>
-                  <Pressable
-                    style={styles.botaoIcone}
-                    onPress={() => navegar(-1)}
-                    disabled={indiceAtual <= 0}
-                  >
-                    <Ionicons
-                      name="chevron-back-circle-outline"
-                      size={32}
-                      color={indiceAtual <= 0 ? '#c2ccd6' : '#1c3d5a'}
-                    />
-                  </Pressable>
-                  <Pressable
-                    style={styles.botaoIcone}
-                    onPress={() => girarFoto(fotoAtual)}
-                    disabled={processando}
-                  >
-                    <Ionicons name="refresh-outline" size={28} color="#1c3d5a" />
-                  </Pressable>
-                  <Pressable
-                    style={styles.botaoIcone}
-                    onPress={() => enviarFotoIndividual(fotoAtual)}
-                    disabled={enviandoFoto}
-                  >
-                    {enviandoFoto ? (
-                      <ActivityIndicator size="small" color="#1c3d5a" />
-                    ) : (
-                      <Ionicons name="cloud-upload-outline" size={26} color="#1c3d5a" />
+          {!complemento && modo === 'slide' && (
+            <View style={styles.slideContainer}>
+              {fotoAtual ? (
+                <>
+                  <Text style={styles.contador}>
+                    {indiceAtual + 1}/{fotos.length} ·{' '}
+                    {fotoAtual.situacao === 'E' ? 'Enviada' : 'Não enviada'}
+                  </Text>
+                  <FlatList
+                    ref={listaSlideRef}
+                    data={fotos}
+                    horizontal
+                    pagingEnabled
+                    showsHorizontalScrollIndicator={false}
+                    keyExtractor={(item) => String(item.id_foto)}
+                    style={styles.listaSlide}
+                    getItemLayout={(_, index) => ({
+                      length: larguraPagina,
+                      offset: larguraPagina * index,
+                      index,
+                    })}
+                    initialScrollIndex={indiceAtual}
+                    onMomentumScrollEnd={aoRolarSlide}
+                    onScrollToIndexFailed={(info) =>
+                      listaSlideRef.current?.scrollToOffset({
+                        offset: info.averageItemLength * info.index,
+                        animated: false,
+                      })
+                    }
+                    renderItem={({ item }) => (
+                      <View style={{ width: larguraPagina, flex: 1 }}>
+                        <Image
+                          source={{ uri: item.arquivo }}
+                          style={styles.imagemSlide}
+                          resizeMode="contain"
+                        />
+                      </View>
                     )}
-                  </Pressable>
-                  <Pressable
-                    style={styles.botaoIcone}
-                    onPress={() => confirmarExclusaoFoto(fotoAtual)}
-                  >
-                    <Ionicons name="trash-outline" size={26} color="#d32f2f" />
-                  </Pressable>
-                  <Pressable
-                    style={styles.botaoIcone}
-                    onPress={() => navegar(1)}
-                    disabled={indiceAtual >= fotos.length - 1}
-                  >
-                    <Ionicons
-                      name="chevron-forward-circle-outline"
-                      size={32}
-                      color={indiceAtual >= fotos.length - 1 ? '#c2ccd6' : '#1c3d5a'}
-                    />
-                  </Pressable>
-                </View>
-              </>
-            ) : (
-              <Text style={styles.vazioTexto}>Nenhuma foto registrada!!!</Text>
-            )}
-          </View>
-        )}
+                  />
 
-        <View style={{ paddingBottom: Math.max(insets.bottom, 10) }} />
+                  {renomeando !== null ? (
+                    <View style={styles.linhaRenomear}>
+                      <Campo label="Legenda" value={renomeando} onChangeText={setRenomeando} />
+                      <View style={styles.linhaBotoesForm}>
+                        <Pressable style={styles.botaoCancelar} onPress={() => setRenomeando(null)}>
+                          <Text style={styles.botaoCancelarTexto}>Cancelar</Text>
+                        </Pressable>
+                        <Pressable
+                          style={[styles.botaoSalvar, styles.botaoSalvarForm]}
+                          onPress={confirmarRenomear}
+                        >
+                          <Text style={styles.botaoSalvarTexto}>Salvar Legenda</Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                  ) : (
+                    <Pressable onPress={() => setRenomeando(fotoAtual.legenda)}>
+                      <Text style={styles.legendaTexto}>{fotoAtual.legenda || '...'}</Text>
+                    </Pressable>
+                  )}
+
+                  <View style={styles.acoesSlide}>
+                    <Pressable
+                      style={styles.botaoIcone}
+                      onPress={() => navegar(-1)}
+                      disabled={indiceAtual <= 0}
+                    >
+                      <Ionicons
+                        name="chevron-back-circle-outline"
+                        size={32}
+                        color={indiceAtual <= 0 ? '#c2ccd6' : '#1c3d5a'}
+                      />
+                    </Pressable>
+                    <Pressable
+                      style={styles.botaoIcone}
+                      onPress={() => girarFoto(fotoAtual)}
+                      disabled={processando}
+                    >
+                      <Ionicons name="refresh-outline" size={28} color="#1c3d5a" />
+                    </Pressable>
+                    <Pressable
+                      style={styles.botaoIcone}
+                      onPress={() => enviarFotoIndividual(fotoAtual)}
+                      disabled={enviandoFoto}
+                    >
+                      {enviandoFoto ? (
+                        <ActivityIndicator size="small" color="#1c3d5a" />
+                      ) : (
+                        <Ionicons name="cloud-upload-outline" size={26} color="#1c3d5a" />
+                      )}
+                    </Pressable>
+                    <Pressable
+                      style={styles.botaoIcone}
+                      onPress={() => confirmarExclusaoFoto(fotoAtual)}
+                    >
+                      <Ionicons name="trash-outline" size={26} color="#d32f2f" />
+                    </Pressable>
+                    <Pressable
+                      style={styles.botaoIcone}
+                      onPress={() => navegar(1)}
+                      disabled={indiceAtual >= fotos.length - 1}
+                    >
+                      <Ionicons
+                        name="chevron-forward-circle-outline"
+                        size={32}
+                        color={indiceAtual >= fotos.length - 1 ? '#c2ccd6' : '#1c3d5a'}
+                      />
+                    </Pressable>
+                  </View>
+                </>
+              ) : (
+                <Text style={styles.vazioTexto}>Nenhuma foto registrada!!!</Text>
+              )}
+            </View>
+          )}
+
+          <View style={{ paddingBottom: Math.max(insets.bottom, 10) }} />
+        </KeyboardAvoidingView>
       </DraxProvider>
     </GestureHandlerRootView>
   );
 }
 
 const styles = StyleSheet.create({
+  flex1: {
+    flex: 1,
+  },
   container: {
     flex: 1,
     backgroundColor: '#f4f6f8',

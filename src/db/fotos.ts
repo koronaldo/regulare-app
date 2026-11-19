@@ -13,6 +13,8 @@ export interface LegendaFoto {
  *  - 'FX' (Fixa): grava a legenda com o texto da opção, sem pedir complemento.
  *  - 'FC' (Fixa + Complemento): pede um texto complementar e grava "label - complemento".
  *  - 'SC' (Só Complemento): pede um texto complementar e grava só ele, sem o label.
+ * tipo_leg vem do servidor sem tratamento (pode ter espaço ou minúsculas), por isso é normalizado
+ * com upper(trim()) na consulta antes de ser comparado com 'FX'/'FC'/'SC'.
  */
 export async function listarLegendas(idSinistro: number): Promise<LegendaFoto[]> {
   const db = await getDb();
@@ -23,7 +25,7 @@ export async function listarLegendas(idSinistro: number): Promise<LegendaFoto[]>
   const idCausa = row?.id_causa_abe ?? 0;
 
   const linhas = await db.getAllAsync<{ id_legendaf: number; nm_legendaf: string; tipo_leg: string }>(
-    `select lc.id_legendaf, lg.nm_legendaf, lg.tipo_leg
+    `select lc.id_legendaf, lg.nm_legendaf, upper(trim(lg.tipo_leg)) as tipo_leg
      from legendafcausa lc
      inner join legendaf lg on lc.id_legendaf = lg.id_legendaf
      where lg.forma_leg = 'F' and lc.id_causa = ?

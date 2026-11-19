@@ -15,7 +15,6 @@ import { StatusBar } from 'expo-status-bar';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
-import * as Sharing from 'expo-sharing';
 import { Directory, File, Paths } from 'expo-file-system';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -39,6 +38,7 @@ import {
 import { buscarSinistroPorId } from '../../../src/db/sinistros';
 import { transferirArquivoUnico, transferirInstanciaUnica } from '../../../src/services/transferenciaDocumentos';
 import { mostrarAlerta } from '../../../src/utils/alerta';
+import { abrirDocumento } from '../../../src/utils/abrirDocumento';
 import { reduzImagem } from '../../../src/utils/imagem';
 
 const OPCOES_FILTRO: OpcaoSelecao[] = [
@@ -46,23 +46,6 @@ const OPCOES_FILTRO: OpcaoSelecao[] = [
   { valor: 'solicitados', label: 'Solicitados' },
   { valor: 'nao_solicitados', label: 'Não solicitados' },
 ];
-
-const MIME_POR_EXTENSAO: Record<string, string> = {
-  pdf: 'application/pdf',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  png: 'image/png',
-  doc: 'application/msword',
-  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  xls: 'application/vnd.ms-excel',
-  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  txt: 'text/plain',
-};
-
-function adivinharMimeType(nomeArquivo: string): string {
-  const ext = nomeArquivo.split('.').pop()?.toLowerCase();
-  return (ext && MIME_POR_EXTENSAO[ext]) || 'application/octet-stream';
-}
 
 function diretorioPaginas(idSinistro: number): Directory {
   return new Directory(Paths.document, 'RegulareFiles', String(idSinistro), 'DocPag');
@@ -241,13 +224,9 @@ export default function DocumentosScreen() {
 
   async function abrirArquivo(arquivo: ArquivoDocumento) {
     try {
-      if (!(await Sharing.isAvailableAsync())) {
-        mostrarAlerta('Indisponível', 'Não é possível abrir arquivos neste dispositivo.');
-        return;
-      }
-      await Sharing.shareAsync(arquivo.nome_arquivo, { mimeType: adivinharMimeType(arquivo.nome_arquivo) });
-    } catch {
-      mostrarAlerta('Erro', 'Erro ao abrir o arquivo.');
+      await abrirDocumento(arquivo.nome_arquivo);
+    } catch (error) {
+      mostrarAlerta('Erro ao abrir o arquivo', error instanceof Error ? error.message : undefined);
     }
   }
 

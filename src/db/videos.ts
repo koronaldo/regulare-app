@@ -17,7 +17,7 @@ export async function listarLegendas(idSinistro: number): Promise<LegendaVideo[]
   const idCausa = row?.id_causa_abe ?? 0;
 
   const linhas = await db.getAllAsync<{ id_legendaf: number; nm_legendaf: string; tipo_leg: string }>(
-    `select lc.id_legendaf, lg.nm_legendaf, lg.tipo_leg
+    `select lc.id_legendaf, lg.nm_legendaf, upper(trim(lg.tipo_leg)) as tipo_leg
      from legendafcausa lc
      inner join legendaf lg on lc.id_legendaf = lg.id_legendaf
      where lg.forma_leg = 'V' and lc.id_causa = ?

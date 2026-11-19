@@ -119,6 +119,23 @@ export async function listarSinistros(
   return db.getAllAsync<SinistroResumo>(sql, params);
 }
 
+export type ContagemSituacoes = Record<SituacaoSinistro, number>;
+
+/** Quantidade de processos em cada aba (Pendentes / Atendidos / Todos) numa única consulta. */
+export async function contarSinistrosPorSituacao(codreg: number): Promise<ContagemSituacoes> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<{ pendentes: number | null; atendidos: number | null; todos: number }>(
+    `select
+       sum(case when data_vistoria is null then 1 else 0 end) as pendentes,
+       sum(case when data_vistoria is not null then 1 else 0 end) as atendidos,
+       count(*) as todos
+     from sinimob
+     where id_regulador = ?`,
+    [codreg],
+  );
+  return { P: row?.pendentes ?? 0, A: row?.atendidos ?? 0, T: row?.todos ?? 0 };
+}
+
 export async function contarSinistros(codreg: number, situacao: SituacaoSinistro): Promise<number> {
   const db = await getDb();
   const condicoes = ['id_regulador = ?'];

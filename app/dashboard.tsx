@@ -21,8 +21,15 @@ import ReanimatedSwipeable from 'react-native-gesture-handler/ReanimatedSwipeabl
 import { cancelarVerificacaoPeriodica } from '../src/services/backgroundSync';
 import { limparCredenciais } from '../src/services/credenciais';
 import { encerrarSessaoServidor, sincronizarComCredenciaisSalvas } from '../src/services/auth';
-import { contarSinistros, listarSinistros, type SinistroResumo, type SituacaoSinistro } from '../src/db/sinistros';
+import {
+  contarSinistrosPorSituacao,
+  listarSinistros,
+  type ContagemSituacoes,
+  type SinistroResumo,
+  type SituacaoSinistro,
+} from '../src/db/sinistros';
 import { excluirSinistroCompleto, limparTodosOsProcessos } from '../src/db/excluirSinistro';
+import { numeroWhatsApp, somenteDigitos } from '../src/utils/telefone';
 
 const ABAS: { valor: SituacaoSinistro; label: string; icone: keyof typeof Ionicons.glyphMap }[] = [
   { valor: 'P', label: 'Pendentes', icone: 'time-outline' },
@@ -41,7 +48,7 @@ export default function DashboardScreen() {
   const [situacao, setSituacao] = useState<SituacaoSinistro>('P');
   const [busca, setBusca] = useState('');
   const [sinistros, setSinistros] = useState<SinistroResumo[]>([]);
-  const [total, setTotal] = useState(0);
+  const [contagens, setContagens] = useState<ContagemSituacoes>({ P: 0, A: 0, T: 0 });
   const [carregando, setCarregando] = useState(false);
   const [sincronizando, setSincronizando] = useState(false);
   const [expandido, setExpandido] = useState<number | null>(null);
@@ -51,12 +58,12 @@ export default function DashboardScreen() {
 
   const recarregarLista = useCallback(async () => {
     if (!codregNum) return;
-    const [lista, totalCount] = await Promise.all([
+    const [lista, totais] = await Promise.all([
       listarSinistros(codregNum, situacao, busca),
-      contarSinistros(codregNum, situacao),
+      contarSinistrosPorSituacao(codregNum),
     ]);
     setSinistros(lista);
-    setTotal(totalCount);
+    setContagens(totais);
   }, [codregNum, situacao, busca]);
 
   useEffect(() => {
@@ -67,13 +74,13 @@ export default function DashboardScreen() {
     async function carregar() {
       setCarregando(true);
       try {
-        const [lista, totalCount] = await Promise.all([
+        const [lista, totais] = await Promise.all([
           listarSinistros(codregNum, situacao, busca),
-          contarSinistros(codregNum, situacao),
+          contarSinistrosPorSituacao(codregNum),
         ]);
         if (!cancelado) {
           setSinistros(lista);
-          setTotal(totalCount);
+          setContagens(totais);
         }
       } finally {
         if (!cancelado) setCarregando(false);
@@ -107,9 +114,27 @@ export default function DashboardScreen() {
     }
   }
 
-  function ligar(numero: string | null) {
+  function contatar(numero: string | null) {
     if (!numero) return;
-    Linking.openURL(`tel:${numero.replace(/\D/g, '')}`);
+    const digitos = somenteDigitos(numero);
+    if (!digitos) return;
+
+    Alert.alert(numero, 'Como deseja entrar em contato?', [
+      { text: 'Cancelar', style: 'cancel' },
+      { text: 'Ligar', onPress: () => abrirLink(`tel:${digitos}`, 'o discador') },
+      {
+        text: 'WhatsApp',
+        onPress: () => abrirLink(`https://wa.me/${numeroWhatsApp(numero)}`, 'o WhatsApp'),
+      },
+    ]);
+  }
+
+  async function abrirLink(url: string, destino: string) {
+    try {
+      await Linking.openURL(url);
+    } catch {
+      Alert.alert('Não foi possível abrir', `Verifique se ${destino} está disponível neste aparelho.`);
+    }
   }
 
   function confirmarExclusao(item: SinistroResumo) {
@@ -124,7 +149,7 @@ export default function DashboardScreen() {
           onPress: async () => {
             await excluirSinistroCompleto(item.id_sinistro);
             setSinistros((atual) => atual.filter((s) => s.id_sinistro !== item.id_sinistro));
-            setTotal((atual) => Math.max(0, atual - 1));
+            setContagens(await contarSinistrosPorSituacao(codregNum));
           },
         },
       ],
@@ -157,7 +182,7 @@ export default function DashboardScreen() {
           onPress: async () => {
             await limparTodosOsProcessos();
             setSinistros([]);
-            setTotal(0);
+            setContagens({ P: 0, A: 0, T: 0 });
             Alert.alert('Concluído', 'Todos os processos e logs foram removidos deste aparelho.');
           },
         },
@@ -245,6 +270,16 @@ export default function DashboardScreen() {
             <Text style={[styles.abaTexto, situacao === aba.valor && styles.abaTextoAtivo]}>
               {aba.label}
             </Text>
+            <View style={[styles.abaContador, situacao === aba.valor && styles.abaContadorAtivo]}>
+              <Text
+                style={[
+                  styles.abaContadorTexto,
+                  situacao === aba.valor && styles.abaContadorTextoAtivo,
+                ]}
+              >
+                {contagens[aba.valor]}
+              </Text>
+            </View>
           </Pressable>
         ))}
       </View>
@@ -368,13 +403,13 @@ export default function DashboardScreen() {
                     {item.apolice && <Text style={styles.cardLinha}>Apólice: {item.apolice}</Text>}
                     <View style={styles.contatos}>
                       {item.fone && (
-                        <Pressable style={styles.contatoBtn} onPress={() => ligar(item.fone)}>
+                        <Pressable style={styles.contatoBtn} onPress={() => contatar(item.fone)}>
                           <Ionicons name="call-outline" size={14} color="#1c3d5a" />
                           <Text style={styles.contatoTexto}>{item.fone}</Text>
                         </Pressable>
                       )}
                       {item.celular && (
-                        <Pressable style={styles.contatoBtn} onPress={() => ligar(item.celular)}>
+                        <Pressable style={styles.contatoBtn} onPress={() => contatar(item.celular)}>
                           <Ionicons name="phone-portrait-outline" size={14} color="#1c3d5a" />
                           <Text style={styles.contatoTexto}>{item.celular}</Text>
                         </Pressable>
@@ -391,7 +426,7 @@ export default function DashboardScreen() {
 
       <View style={styles.footer}>
         <Text style={styles.footerTexto}>
-          ({total}) {labelAba}
+          ({contagens[situacao]}) {labelAba}
         </Text>
       </View>
     </GestureHandlerRootView>
@@ -496,6 +531,25 @@ const styles = StyleSheet.create({
   },
   abaTextoAtivo: {
     color: '#1c3d5a',
+  },
+  abaContador: {
+    minWidth: 20,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 10,
+    backgroundColor: '#eef2f5',
+    alignItems: 'center',
+  },
+  abaContadorAtivo: {
+    backgroundColor: '#1c3d5a',
+  },
+  abaContadorTexto: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#8a97a3',
+  },
+  abaContadorTextoAtivo: {
+    color: '#fff',
   },
   buscaContainer: {
     flexDirection: 'row',

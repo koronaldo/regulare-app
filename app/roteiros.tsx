@@ -1,5 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, FlatList, Linking, Platform, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  FlatList,
+  Linking,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Switch,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -26,6 +37,22 @@ function enderecoCompleto(item: SinistroRoteiro): string {
   return partes.filter((p) => p && p.trim()).join(', ');
 }
 
+/** Minúsculas e sem acentos, pra busca casar "São Paulo" com "sao paulo". */
+function normalizar(texto: string | null | undefined): string {
+  return (texto ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
+/** Busca por segurado, número do sinistro, rua (endereço/bairro) ou cidade. */
+function correspondeBusca(item: SinistroRoteiro, termo: string): boolean {
+  if (!termo) return true;
+  const campos = [item.nm_segurado, item.nro_sinistro, item.endereco, item.bairro, item.nm_cidade];
+  return campos.some((campo) => normalizar(campo).includes(termo));
+}
+
 export default function RoteirosScreen() {
   const { codreg } = useLocalSearchParams<{ codreg: string }>();
   const codregNum = Number(codreg);
@@ -35,6 +62,7 @@ export default function RoteirosScreen() {
   const [processos, setProcessos] = useState<SinistroRoteiro[]>([]);
   const [idsSelecionados, setIdsSelecionados] = useState<number[]>([]);
   const [montando, setMontando] = useState(false);
+  const [busca, setBusca] = useState('');
   /** Cache de geocodificação por sinistro: null = endereço não localizado (não tenta de novo). */
   const [coordenadas, setCoordenadas] = useState<Record<number, Coordenada | null>>({});
   /** Só fica preenchida depois que o usuário monta um roteiro e concede a permissão. */
@@ -63,14 +91,23 @@ export default function RoteirosScreen() {
     };
   }, [codregNum]);
 
-  const mapaProcessos = useMemo(() => new Map(processos.map((p) => [p.id_sinistro, p])), [processos]);
+  const mapaProcessos = useMemo(
+    () => new Map(processos.map((p) => [p.id_sinistro, p])),
+    [processos],
+  );
   const selecionados = useMemo(
-    () => idsSelecionados.map((id) => mapaProcessos.get(id)).filter((p): p is SinistroRoteiro => !!p),
+    () =>
+      idsSelecionados.map((id) => mapaProcessos.get(id)).filter((p): p is SinistroRoteiro => !!p),
     [idsSelecionados, mapaProcessos],
   );
   const disponiveis = useMemo(
     () => processos.filter((p) => !idsSelecionados.includes(p.id_sinistro)),
     [processos, idsSelecionados],
+  );
+  const termoBusca = normalizar(busca);
+  const disponiveisFiltrados = useMemo(
+    () => disponiveis.filter((p) => correspondeBusca(p, termoBusca)),
+    [disponiveis, termoBusca],
   );
 
   // Geocodifica um endereço por vez: grava no cache e deixa o próprio efeito reexecutar (ele
@@ -170,12 +207,20 @@ export default function RoteirosScreen() {
         if (coord) {
           pontos.push(coord);
         } else {
-          falhas.push(item.nm_segurado || item.nro_sinistro || enderecoCompleto(item) || `Sinistro ${item.id_sinistro}`);
+          falhas.push(
+            item.nm_segurado ||
+              item.nro_sinistro ||
+              enderecoCompleto(item) ||
+              `Sinistro ${item.id_sinistro}`,
+          );
         }
       }
 
       if (pontos.length === 0) {
-        mostrarAlerta('Endereço não localizado', 'Não foi possível localizar nenhum dos endereços selecionados.');
+        mostrarAlerta(
+          'Endereço não localizado',
+          'Não foi possível localizar nenhum dos endereços selecionados.',
+        );
         return;
       }
       if (!origemAtual && pontos.length < 2) {
@@ -229,57 +274,67 @@ export default function RoteirosScreen() {
             <Text style={styles.vazioTexto}>Nenhum processo pendente de vistoria.</Text>
           </View>
         ) : (
-          <SortableContainer sortable={sortable} scrollRef={listaRef} style={styles.flex1}>
-            <FlatList
-              ref={listaRef}
-              data={sortable.data}
-              keyExtractor={sortable.stableKeyExtractor}
-              onScroll={sortable.onScroll}
-              onContentSizeChange={sortable.onContentSizeChange}
-              scrollEventThrottle={16}
-              contentContainerStyle={styles.lista}
-              ListHeaderComponent={
-                <>
-                  {selecionados.length > 0 && (
-                    <>
-                      <MapaRoteiro pontos={pontosMapa} origem={origem} />
-                      {localizando && <Text style={styles.dicaArrastar}>Localizando endereços…</Text>}
-                    </>
-                  )}
-                  <Text style={styles.tituloSecao}>Selecionados</Text>
-                  {selecionados.length === 0 && (
-                    <Text style={styles.mensagemVazia}>Selecione os processos na lista abaixo para montar o roteiro.</Text>
-                  )}
-                  {selecionados.length > 0 && (
-                    <Text style={styles.dicaArrastar}>Toque e segure num item pra arrastar e mudar a ordem.</Text>
-                  )}
-                </>
-              }
-              renderItem={({ item, index }) => (
-                <SortableItem sortable={sortable} index={index} style={styles.itemArrastavel}>
-                  <View style={[styles.card, styles.cardSelecionado]}>
-                    <Ionicons name="reorder-three-outline" size={20} color="#8a97a3" />
-                    <Text style={styles.numeroOrdem}>{index + 1}</Text>
-                    <View style={styles.cardTexto}>
-                      <Text style={styles.cardSegurado} numberOfLines={1}>
-                        {item.nm_segurado || 'Segurado não informado'}
-                      </Text>
-                      <Text style={styles.cardLinha} numberOfLines={1}>
-                        Sinistro <Text style={styles.cardDestaque}>{item.nro_sinistro}</Text>
-                      </Text>
-                      <Text style={styles.cardEndereco} numberOfLines={3}>
-                        {enderecoCompleto(item) || 'Endereço não informado'}
-                      </Text>
-                    </View>
-                    <Switch value onValueChange={() => desselecionar(item.id_sinistro)} trackColor={{ true: '#1c3d5a' }} />
-                  </View>
-                </SortableItem>
+          <>
+            <View style={styles.barraBusca}>
+              <Ionicons name="search" size={18} color="#8a97a3" />
+              <TextInput
+                style={styles.campoBusca}
+                placeholder="Buscar por segurado, sinistro, rua ou cidade"
+                placeholderTextColor="#8a97a3"
+                value={busca}
+                onChangeText={setBusca}
+                autoCorrect={false}
+                autoCapitalize="none"
+                returnKeyType="search"
+              />
+              {busca.length > 0 && (
+                <Pressable
+                  onPress={() => setBusca('')}
+                  hitSlop={10}
+                  accessibilityLabel="Limpar busca"
+                >
+                  <Ionicons name="close-circle" size={18} color="#8a97a3" />
+                </Pressable>
               )}
-              ListFooterComponent={
-                <>
-                  <Text style={[styles.tituloSecao, styles.tituloSecaoDisponiveis]}>Disponíveis ({disponiveis.length})</Text>
-                  {disponiveis.map((item) => (
-                    <View key={item.id_sinistro} style={styles.card}>
+            </View>
+            <SortableContainer sortable={sortable} scrollRef={listaRef} style={styles.flex1}>
+              <FlatList
+                ref={listaRef}
+                data={sortable.data}
+                keyExtractor={sortable.stableKeyExtractor}
+                onScroll={sortable.onScroll}
+                onContentSizeChange={sortable.onContentSizeChange}
+                scrollEventThrottle={16}
+                keyboardShouldPersistTaps="handled"
+                contentContainerStyle={styles.lista}
+                ListHeaderComponent={
+                  <>
+                    {selecionados.length > 0 && (
+                      <>
+                        <MapaRoteiro pontos={pontosMapa} origem={origem} />
+                        {localizando && (
+                          <Text style={styles.dicaArrastar}>Localizando endereços…</Text>
+                        )}
+                      </>
+                    )}
+                    <Text style={styles.tituloSecao}>Selecionados</Text>
+                    {selecionados.length === 0 && (
+                      <Text style={styles.mensagemVazia}>
+                        Selecione os processos na lista abaixo para montar o roteiro.
+                      </Text>
+                    )}
+                    {selecionados.length > 0 && (
+                      <Text style={styles.dicaArrastar}>
+                        Toque e segure num item pra arrastar e mudar a ordem.
+                      </Text>
+                    )}
+                  </>
+                }
+                renderItem={({ item, index }) => (
+                  <SortableItem sortable={sortable} index={index} style={styles.itemArrastavel}>
+                    <View style={[styles.card, styles.cardSelecionado]}>
+                      <Ionicons name="reorder-three-outline" size={20} color="#8a97a3" />
+                      <Text style={styles.numeroOrdem}>{index + 1}</Text>
                       <View style={styles.cardTexto}>
                         <Text style={styles.cardSegurado} numberOfLines={1}>
                           {item.nm_segurado || 'Segurado não informado'}
@@ -287,21 +342,55 @@ export default function RoteirosScreen() {
                         <Text style={styles.cardLinha} numberOfLines={1}>
                           Sinistro <Text style={styles.cardDestaque}>{item.nro_sinistro}</Text>
                         </Text>
-                        <Text style={styles.cardEndereco}>
+                        <Text style={styles.cardEndereco} numberOfLines={3}>
                           {enderecoCompleto(item) || 'Endereço não informado'}
                         </Text>
                       </View>
                       <Switch
-                        value={false}
-                        onValueChange={() => selecionar(item.id_sinistro)}
+                        value
+                        onValueChange={() => desselecionar(item.id_sinistro)}
                         trackColor={{ true: '#1c3d5a' }}
                       />
                     </View>
-                  ))}
-                </>
-              }
-            />
-          </SortableContainer>
+                  </SortableItem>
+                )}
+                ListFooterComponent={
+                  <>
+                    <Text style={[styles.tituloSecao, styles.tituloSecaoDisponiveis]}>
+                      {termoBusca
+                        ? `Disponíveis (${disponiveisFiltrados.length} de ${disponiveis.length})`
+                        : `Disponíveis (${disponiveis.length})`}
+                    </Text>
+                    {!!termoBusca && disponiveisFiltrados.length === 0 && (
+                      <Text style={styles.mensagemVazia}>
+                        Nenhum processo encontrado para “{busca.trim()}”.
+                      </Text>
+                    )}
+                    {disponiveisFiltrados.map((item) => (
+                      <View key={item.id_sinistro} style={styles.card}>
+                        <View style={styles.cardTexto}>
+                          <Text style={styles.cardSegurado} numberOfLines={1}>
+                            {item.nm_segurado || 'Segurado não informado'}
+                          </Text>
+                          <Text style={styles.cardLinha} numberOfLines={1}>
+                            Sinistro <Text style={styles.cardDestaque}>{item.nro_sinistro}</Text>
+                          </Text>
+                          <Text style={styles.cardEndereco}>
+                            {enderecoCompleto(item) || 'Endereço não informado'}
+                          </Text>
+                        </View>
+                        <Switch
+                          value={false}
+                          onValueChange={() => selecionar(item.id_sinistro)}
+                          trackColor={{ true: '#1c3d5a' }}
+                        />
+                      </View>
+                    ))}
+                  </>
+                }
+              />
+            </SortableContainer>
+          </>
         )}
 
         <View style={[styles.rodape, { paddingBottom: Math.max(insets.bottom, 16) }]}>
@@ -366,6 +455,24 @@ const styles = StyleSheet.create({
   vazioTexto: {
     color: '#8a97a3',
     fontSize: 14,
+  },
+  barraBusca: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#fff',
+    marginHorizontal: 16,
+    marginTop: 12,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#e3e8ed',
+  },
+  campoBusca: {
+    flex: 1,
+    fontSize: 14,
+    color: '#1c3d5a',
+    paddingVertical: 10,
   },
   lista: {
     padding: 16,

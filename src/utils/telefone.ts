@@ -12,3 +12,18 @@ export function formatarTelefone(valor: string): string {
 
   return parte2 ? `(${ddd}) ${parte1}-${parte2}` : `(${ddd}) ${parte1}`;
 }
+
+/** Só os dígitos do número, sem o zero de operadora/DDD na frente (ex.: "049 99957-9539" -> "49999579539"). */
+export function somenteDigitos(numero: string): string {
+  return numero.replace(/\D/g, '').replace(/^0+/, '');
+}
+
+/**
+ * Número no formato internacional exigido pelo WhatsApp (wa.me): DDI + DDD + número.
+ * Números brasileiros com DDD (10 ou 11 dígitos) recebem o 55 na frente; se já vier com 55, mantém.
+ */
+export function numeroWhatsApp(numero: string): string {
+  const digitos = somenteDigitos(numero);
+  if (digitos.length === 10 || digitos.length === 11) return `55${digitos}`;
+  return digitos;
+}

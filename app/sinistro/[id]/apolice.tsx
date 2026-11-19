@@ -3,25 +3,13 @@ import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, V
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import * as Sharing from 'expo-sharing';
 import { Directory, File, Paths } from 'expo-file-system';
 
 import { excluirDownload, inserirDownload, listarDownloads, type DownloadResumo } from '../../../src/db/downloads';
 import { buscarArquivosParaDownload, montarUrlArquivo } from '../../../src/services/downloads';
 import { buscarSinistroPorId } from '../../../src/db/sinistros';
 import { mostrarAlerta } from '../../../src/utils/alerta';
-
-const MIME_POR_EXTENSAO: Record<string, string> = {
-  pdf: 'application/pdf',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  png: 'image/png',
-};
-
-function adivinharMimeType(nomeArquivo: string): string {
-  const ext = nomeArquivo.split('.').pop()?.toLowerCase();
-  return (ext && MIME_POR_EXTENSAO[ext]) || 'application/pdf';
-}
+import { abrirDocumento, mimeTypeDoArquivo } from '../../../src/utils/abrirDocumento';
 
 function diretorioDownloads(idSinistro: number): Directory {
   return new Directory(Paths.document, 'RegulareFiles', String(idSinistro), 'CG_Atas');
@@ -121,13 +109,10 @@ export default function ApoliceScreen() {
         mostrarAlerta('Arquivo não encontrado', 'O arquivo pode ter sido removido do dispositivo.');
         return;
       }
-      if (!(await Sharing.isAvailableAsync())) {
-        mostrarAlerta('Indisponível', 'Não é possível abrir arquivos neste dispositivo.');
-        return;
-      }
-      await Sharing.shareAsync(arquivo.uri, { mimeType: adivinharMimeType(download.fisico) });
-    } catch {
-      mostrarAlerta('Erro', 'Erro ao abrir o arquivo.');
+      // Downloads sem extensão conhecida são apólices/condições gerais em PDF.
+      await abrirDocumento(arquivo.uri, mimeTypeDoArquivo(download.fisico, 'application/pdf'));
+    } catch (error) {
+      mostrarAlerta('Erro ao abrir o arquivo', error instanceof Error ? error.message : undefined);
     }
   }
 
