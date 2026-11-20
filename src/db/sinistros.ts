@@ -451,3 +451,22 @@ export async function salvarCadastroSinistro(idSinistro: number, dados: DadosCad
     await registrarLog(idSinistro, 'Vistoria realizada');
   }
 }
+
+/**
+ * Grava a coordenada do processo (coorde_lat/coorde_log). Vai pro servidor junto com o cadastro
+ * na próxima transferência (transferirDadosCadastrais). Ponto decimal, 7 casas (~1 cm) — cabe no
+ * varchar(20) da coluna.
+ */
+export async function atualizarCoordenadaSinistro(
+  idSinistro: number,
+  latitude: number,
+  longitude: number,
+): Promise<void> {
+  const db = await getDb();
+  await db.runAsync('update sinimob set coorde_lat = ?, coorde_log = ? where id_sinistro = ?', [
+    latitude.toFixed(7),
+    longitude.toFixed(7),
+    idSinistro,
+  ]);
+  await registrarLog(idSinistro, 'Coordenada corrigida pela conferência de endereços');
+}

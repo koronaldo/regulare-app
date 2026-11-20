@@ -22,74 +22,24 @@ import * as Location from 'expo-location';
 import { listarSinistrosParaRoteiro, type SinistroRoteiro } from '../src/db/sinistros';
 import { mostrarAlerta } from '../src/utils/alerta';
 import {
-  coordenadaDeTexto,
-  distanciaKm,
   montarUrlGoogleMaps,
   type Coordenada,
   type ParadaRoteiro,
 } from '../src/utils/rota';
 import { MapaRoteiro, type PontoRoteiro } from '../src/components/MapaRoteiro';
+import { ConferenciaEnderecos } from '../src/components/ConferenciaEnderecos';
+import {
+  coordenadaGravada,
+  enderecoCompleto,
+  enderecoParaBusca,
+  geocodificarProcesso,
+} from '../src/utils/enderecoProcesso';
 
 /**
  * A lista arrastável exige altura fixa por item. Etiqueta compacta (nome, sinistro e endereço em
  * uma linha cada) pra caber mais itens na tela e o arraste não precisar rolar tanto.
  */
 const ALTURA_ITEM = 72;
-
-function enderecoCompleto(item: SinistroRoteiro): string {
-  const partes = [
-    [item.endereco, item.nro_predio].filter(Boolean).join(', '),
-    item.bairro,
-    item.cep,
-    item.nm_cidade && item.id_estado ? `${item.nm_cidade} - ${item.id_estado}` : item.nm_cidade,
-  ];
-  return partes.filter((p) => p && p.trim()).join(', ');
-}
-
-/** Raio máximo (km) entre o ponto geocodificado e o centro da cidade do processo. */
-const RAIO_MAXIMO_CIDADE_KM = 40;
-
-/**
- * Endereço no formato que os geocoders entendem melhor ("Rua X, 123 - Bairro, Cidade - UF, CEP,
- * Brasil"). Sem o país, o geocoder pode achar uma rua homônima em outra cidade/país.
- */
-function enderecoParaBusca(item: SinistroRoteiro, incluirNumero = true): string {
-  const rua = [item.endereco?.trim(), incluirNumero ? item.nro_predio?.trim() : null]
-    .filter(Boolean)
-    .join(', ');
-  const ruaBairro = [rua, item.bairro?.trim()].filter(Boolean).join(' - ');
-  const cidade = [item.nm_cidade?.trim(), item.id_estado?.trim()].filter(Boolean).join(' - ');
-  return [ruaBairro, cidade, item.cep?.trim(), 'Brasil'].filter(Boolean).join(', ');
-}
-
-/** Coordenada já gravada no processo (tela Coordenadas), se houver. */
-function coordenadaGravada(item: SinistroRoteiro): Coordenada | null {
-  return coordenadaDeTexto(item.coorde_lat, item.coorde_log);
-}
-
-/**
- * Geocodifica no aparelho só pra desenhar o mapa de prévia. Descarta resultados longe da cidade do
- * processo (o geocoder do Android às vezes devolve rua homônima em outra cidade ou só o centro do
- * CEP); se o endereço com número não der certo, tenta sem o número.
- */
-async function geocodificarProcesso(item: SinistroRoteiro): Promise<Coordenada | null> {
-  const centro = coordenadaDeTexto(item.cidade_lat, item.cidade_lng);
-  const tentativas = [enderecoParaBusca(item, true), enderecoParaBusca(item, false)];
-
-  for (const endereco of new Set(tentativas)) {
-    if (!item.endereco?.trim() && !item.nm_cidade?.trim()) break;
-    try {
-      const resultados = await Location.geocodeAsync(endereco);
-      const valido = resultados.find(
-        (r) => !centro || distanciaKm(centro, r) <= RAIO_MAXIMO_CIDADE_KM,
-      );
-      if (valido) return { latitude: valido.latitude, longitude: valido.longitude };
-    } catch {
-      // tenta a próxima forma do endereço
-    }
-  }
-  return null;
-}
 
 /** Minúsculas e sem acentos, pra busca casar "São Paulo" com "sao paulo". */
 function normalizar(texto: string | null | undefined): string {
@@ -121,6 +71,7 @@ export default function RoteirosScreen() {
   const [coordenadas, setCoordenadas] = useState<Record<number, Coordenada | null>>({});
   /** Só fica preenchida depois que o usuário monta um roteiro e concede a permissão. */
   const [origem, setOrigem] = useState<Coordenada | null>(null);
+  const [conferindo, setConferindo] = useState(false);
 
   useEffect(() => {
     if (!codregNum) return;
@@ -294,6 +245,18 @@ export default function RoteirosScreen() {
     }
   }
 
+  /** Reflete na tela a coordenada corrigida pela conferência: lista, mapa e roteiro. */
+  function aoCorrigirCoordenada(idSinistro: number, coord: Coordenada) {
+    setProcessos((atual) =>
+      atual.map((p) =>
+        p.id_sinistro === idSinistro
+          ? { ...p, coorde_lat: coord.latitude.toFixed(7), coorde_log: coord.longitude.toFixed(7) }
+          : p,
+      ),
+    );
+    setCoordenadas((atual) => ({ ...atual, [idSinistro]: coord }));
+  }
+
   function voltar() {
     router.back();
   }
@@ -364,6 +327,10 @@ export default function RoteirosScreen() {
                         {localizando && (
                           <Text style={styles.dicaArrastar}>Localizando endereços…</Text>
                         )}
+                        <Pressable style={styles.botaoConferir} onPress={() => setConferindo(true)}>
+                          <Ionicons name="shield-checkmark-outline" size={18} color="#1c3d5a" />
+                          <Text style={styles.botaoConferirTexto}>Conferir endereços</Text>
+                        </Pressable>
                       </>
                     )}
                     <Text style={styles.tituloSecao}>Selecionados</Text>
@@ -461,6 +428,15 @@ export default function RoteirosScreen() {
             <Text style={styles.botaoMontarTexto}>{montando ? 'Montando…' : 'Montar Roteiro'}</Text>
           </Pressable>
         </View>
+        {/* Montado só enquanto aberto: cada abertura confere de novo, do zero. */}
+        {conferindo && (
+          <ConferenciaEnderecos
+            visivel
+            processos={selecionados}
+            onFechar={() => setConferindo(false)}
+            onCoordenadaCorrigida={aoCorrigirCoordenada}
+          />
+        )}
       </DraxProvider>
     </GestureHandlerRootView>
   );
@@ -547,6 +523,23 @@ const styles = StyleSheet.create({
     color: '#8a97a3',
     fontStyle: 'italic',
     marginBottom: 14,
+  },
+  botaoConferir: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderColor: '#1c3d5a',
+    borderRadius: 8,
+    paddingVertical: 9,
+    marginBottom: 12,
+    backgroundColor: '#fff',
+  },
+  botaoConferirTexto: {
+    color: '#1c3d5a',
+    fontWeight: '700',
+    fontSize: 14,
   },
   dicaArrastar: {
     fontSize: 12,
