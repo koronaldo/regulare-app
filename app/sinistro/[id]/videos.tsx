@@ -186,14 +186,14 @@ export default function VideosScreen() {
 
   async function confirmarComplemento() {
     if (!complemento) return;
-    if (!complemento.texto.trim()) {
-      mostrarAlerta('Campo obrigatório', 'Informe o complemento da legenda.');
-      return;
-    }
-    const legendaFinal =
-      normalizarTipoLegenda(complemento.legenda.tipo_leg) === 'FC'
-        ? `${complemento.legenda.nm_legendaf} ${complemento.texto.trim()}`
-        : complemento.texto.trim();
+    // Complemento é opcional: em branco, grava só com o nome da legenda (vale pra FC e SC —
+    // em SC, sem isso a legenda ficaria vazia).
+    const texto = complemento.texto.trim();
+    const legendaFinal = !texto
+      ? complemento.legenda.nm_legendaf
+      : normalizarTipoLegenda(complemento.legenda.tipo_leg) === 'FC'
+        ? `${complemento.legenda.nm_legendaf} ${texto}`
+        : texto;
     const { uri } = complemento;
     setComplemento(null);
     await finalizarVideo(uri, legendaFinal);
@@ -357,7 +357,7 @@ export default function VideosScreen() {
         <Secao titulo="Complemento da legenda" style={styles.secaoComplemento}>
           <Campo
             label={complemento.legenda.nm_legendaf}
-            obrigatorio
+            placeholder="Opcional — em branco, usa só a legenda"
             value={complemento.texto}
             onChangeText={(v) => setComplemento((atual) => (atual ? { ...atual, texto: v } : atual))}
           />
