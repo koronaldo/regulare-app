@@ -556,7 +556,7 @@ export default function FotosScreen() {
                   <Text style={styles.vazioTexto}>Nenhuma foto registrada!!!</Text>
                 }
                 renderItem={(item, { arrastando }) => (
-                  <View style={[styles.celulaGrade, arrastando && styles.celulaGradeArrastando]}>
+                  <View style={styles.celulaGrade}>
                     <Pressable
                       style={styles.celulaGradeConteudo}
                       onPress={() => abrirNaGrade(item)}
@@ -569,6 +569,10 @@ export default function FotosScreen() {
                         {item.legenda || '...'}
                       </Text>
                     </Pressable>
+                    {/* Destaque como moldura por cima, sem mexer no cartão: trocar borda/elevação
+                        de um cartão com recorte (overflow hidden) fazia o Android parar de
+                        desenhar a foto e a legenda depois do arraste. */}
+                    {arrastando && <View pointerEvents="none" style={styles.molduraArrastando} />}
                   </View>
                 )}
               />
@@ -806,25 +810,26 @@ const styles = StyleSheet.create({
   gradeConteudo: {
     padding: 10,
   },
+  // Sem overflow hidden nem elevation: a célula é ampliada e levantada durante o arraste, e no
+  // Android essa combinação deixava o conteúdo recortado (foto e legenda sumiam). O arredondamento
+  // fica na própria foto e a borda clara substitui a sombra.
   celulaGrade: {
     flex: 1,
     margin: 4,
     backgroundColor: '#fff',
     borderRadius: 8,
-    overflow: 'hidden',
-    elevation: 1,
-    shadowColor: '#000',
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
-    shadowOffset: { width: 0, height: 1 },
+    borderWidth: 1,
+    borderColor: '#e1e6eb',
   },
-  celulaGradeArrastando: {
+  molduraArrastando: {
+    position: 'absolute',
+    top: -1,
+    left: -1,
+    right: -1,
+    bottom: -1,
     borderWidth: 3,
     borderColor: '#e8b93a',
-    backgroundColor: '#fffbeb',
-    shadowOpacity: 0.35,
-    shadowRadius: 10,
-    elevation: 10,
+    borderRadius: 8,
   },
   celulaGradeConteudo: {
     flex: 1,
@@ -832,6 +837,8 @@ const styles = StyleSheet.create({
   miniatura: {
     width: '100%',
     backgroundColor: '#e6e9ec',
+    borderTopLeftRadius: 7,
+    borderTopRightRadius: 7,
   },
   miniaturaLegenda: {
     fontSize: 9,

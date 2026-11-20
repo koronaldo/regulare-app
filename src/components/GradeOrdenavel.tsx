@@ -142,6 +142,7 @@ export function GradeOrdenavel<T>({
             <CelulaOrdenavel
               key={chave}
               chave={chave}
+              arrastando={arrastando}
               indiceInicial={indiceNaLista}
               total={total}
               numColumns={numColumns}
@@ -176,6 +177,7 @@ export function GradeOrdenavel<T>({
 
 interface CelulaProps {
   chave: string;
+  arrastando: boolean;
   /** Posição na lista ao montar — as posições compartilhadas só são atualizadas depois do render. */
   indiceInicial: number;
   total: number;
@@ -196,6 +198,7 @@ interface CelulaProps {
 
 function CelulaOrdenavel({
   chave,
+  arrastando,
   indiceInicial,
   total,
   numColumns,
@@ -337,21 +340,21 @@ function CelulaOrdenavel({
     },
   });
 
-  const estilo = useAnimatedStyle(() => {
-    const emDestaque = chaveAtiva.value === chave;
-    return {
-      transform: [{ translateX: x.value }, { translateY: y.value }, { scale: escala.value }],
-      // zIndex + elevation: no Android a elevação também decide quem fica por cima.
-      zIndex: emDestaque ? 100 : 1,
-      elevation: emDestaque ? 12 : 1,
-      opacity: chaveAtiva.value !== '' && !emDestaque ? 0.75 : 1,
-    };
-  });
+  const estilo = useAnimatedStyle(() => ({
+    transform: [{ translateX: x.value }, { translateY: y.value }, { scale: escala.value }],
+  }));
 
   return (
     <GestureDetector gesture={gesto}>
       <Reanimated.View
-        style={[styles.celula, { width: larguraCelula, height: alturaCelula }, estilo]}
+        // zIndex vem do estado do React (não da animação): no Android, alterar zIndex/elevation
+        // direto pela thread de UI não atualiza a ordem de desenho de forma confiável.
+        style={[
+          styles.celula,
+          { width: larguraCelula, height: alturaCelula },
+          arrastando && styles.celulaPorCima,
+          estilo,
+        ]}
       >
         {children}
       </Reanimated.View>
@@ -364,6 +367,9 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     top: 0,
+  },
+  celulaPorCima: {
+    zIndex: 100,
   },
   selo: {
     position: 'absolute',
