@@ -1,10 +1,11 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { Animated, Easing, StyleSheet, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { router } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 
 import { sessaoValida } from '../src/services/credenciais';
+import { lerFotoPendente } from '../src/services/fotoPendente';
 
 const DURACAO_GIRO_MS = 3200;
 const DURACAO_TITULO_MS = 1100;
@@ -65,6 +66,36 @@ export default function AberturaScreen() {
   const subtitulo = useMemo(() => new Animated.Value(0), []);
   const estrela = useMemo(() => new Animated.Value(0), []);
 
+  /** Impede que a animação e a recuperação de foto pendente naveguem as duas. */
+  const navegou = useRef(false);
+
+  useEffect(() => {
+    // O Android mata o processo do app enquanto a câmera/galeria está aberta (falta de memória):
+    // na volta o app abre do zero aqui, e a foto tirada ficaria esperando o usuário achar o
+    // Álbum de novo — pra ele parecia que "o app reiniciou e perdeu a foto". Se há foto pendente
+    // e sessão válida, pula a animação e reabre direto o Álbum, que conclui o salvamento via
+    // getPendingResultAsync() (ver fotos.tsx). A pilha dashboard → sinistro → fotos é remontada
+    // pro botão voltar continuar funcionando como antes.
+    let cancelado = false;
+    (async () => {
+      const pendente = await lerFotoPendente();
+      if (!pendente || cancelado || navegou.current) return;
+      const sessao = await sessaoValida();
+      if (!sessao || cancelado || navegou.current) return;
+      navegou.current = true;
+      router.replace({
+        pathname: '/dashboard',
+        params: { codreg: sessao.codreg ?? '', nomusu: sessao.nomusu ?? '', nomregula: sessao.nomregula ?? '' },
+      });
+      const id = String(pendente.idSinistro);
+      router.push({ pathname: '/sinistro/[id]', params: { id } });
+      router.push({ pathname: '/sinistro/[id]/fotos', params: { id } });
+    })();
+    return () => {
+      cancelado = true;
+    };
+  }, []);
+
   useEffect(() => {
     // A navegação sai da conclusão da sequência, não de um timeout paralelo: assim a animação
     // nunca é cortada no meio se um aparelho mais lento demorar a renderizar.
@@ -99,10 +130,13 @@ export default function AberturaScreen() {
     sequencia.start(({ finished }) => {
       if (!finished) return;
       setTimeout(async () => {
+        if (navegou.current) return;
         // Sessão de 24h ainda válida (ver auth.ts/credenciais.ts): pula a tela de login e abre
         // direto no dashboard com os dados do último login — sem isso, o app pedia login toda
         // vez que abria (ou que o Android matava o processo em segundo plano).
         const sessao = await sessaoValida();
+        if (navegou.current) return;
+        navegou.current = true;
         if (sessao) {
           router.replace({
             pathname: '/dashboard',

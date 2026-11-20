@@ -18,7 +18,6 @@ import { StatusBar } from 'expo-status-bar';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { DraxProvider, SortableContainer, SortableItem, useSortableList } from 'react-native-drax';
 import * as ImagePicker from 'expo-image-picker';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import { Directory, File, Paths } from 'expo-file-system';
@@ -40,6 +39,7 @@ import {
   normalizarTipoLegenda,
 } from '../../../src/db/fotos';
 import { buscarSinistroPorId } from '../../../src/db/sinistros';
+import { GradeOrdenavel } from '../../../src/components/GradeOrdenavel';
 import { transferirFotoUnica } from '../../../src/services/transferenciaFotos';
 import { mostrarAlerta } from '../../../src/utils/alerta';
 import { reduzImagem } from '../../../src/utils/imagem';
@@ -50,6 +50,7 @@ import {
 } from '../../../src/services/fotoPendente';
 
 const NUM_COLUNAS_GRADE = 4;
+const chaveFoto = (foto: FotoResumo) => String(foto.id_foto);
 
 function diretorioFotos(idSinistro: number): Directory {
   const dir = new Directory(Paths.document, 'RegulareFiles', String(idSinistro), 'Fotos');
@@ -88,7 +89,6 @@ export default function FotosScreen() {
   const larguraPagina = larguraTela - 32;
   const tamanhoMiniatura = (larguraTela - 10 * 2) / NUM_COLUNAS_GRADE - 8;
   const listaSlideRef = useRef<FlatList<FotoResumo>>(null);
-  const listaGradeRef = useRef<FlatList<FotoResumo>>(null);
 
   const [carregando, setCarregando] = useState(true);
   const [cabecalho, setCabecalho] = useState({ segurado: '', sinistro: '' });
@@ -103,13 +103,6 @@ export default function FotosScreen() {
   const [enviandoFoto, setEnviandoFoto] = useState(false);
   /** Garante que a recuperação da foto pendente seja tentada uma vez só por montagem da tela. */
   const recuperacaoTentada = useRef(false);
-
-  const sortable = useSortableList({
-    data: fotos,
-    numColumns: NUM_COLUNAS_GRADE,
-    keyExtractor: (item) => String(item.id_foto),
-    onReorder: ({ data }) => salvarNovaOrdem(data),
-  });
 
   useFocusEffect(
     useCallback(() => {
@@ -423,7 +416,6 @@ export default function FotosScreen() {
 
   return (
     <GestureHandlerRootView style={styles.container}>
-      <DraxProvider>
         <StatusBar style="light" />
 
         <View style={[styles.header, { paddingTop: Math.max(insets.top, 24) + 8 }]}>
@@ -548,76 +540,38 @@ export default function FotosScreen() {
             <>
               {fotos.length > 0 && (
                 <Text style={styles.dicaGrade}>
-                  Toque e segure numa foto para arrastar e soltar em qualquer posição.
+                  Segure a foto até ela ficar destacada e arraste até a posição desejada. O número mostra a posição.
                 </Text>
               )}
-              <SortableContainer
-                sortable={sortable}
-                scrollRef={listaGradeRef}
+              <GradeOrdenavel
+                data={fotos}
+                keyExtractor={chaveFoto}
+                numColumns={NUM_COLUNAS_GRADE}
+                larguraCelula={tamanhoMiniatura + 8}
+                alturaCelula={tamanhoMiniatura + 32}
+                padding={10}
                 style={styles.gradeContainer}
-              >
-                <FlatList
-                  ref={listaGradeRef}
-                  data={sortable.data}
-                  numColumns={NUM_COLUNAS_GRADE}
-                  keyExtractor={sortable.stableKeyExtractor}
-                  onScroll={sortable.onScroll}
-                  onContentSizeChange={sortable.onContentSizeChange}
-                  scrollEventThrottle={16}
-                  contentContainerStyle={styles.gradeConteudo}
-                  ListEmptyComponent={
-                    <Text style={styles.vazioTexto}>Nenhuma foto registrada!!!</Text>
-                  }
-                  renderItem={({ item, index }) => (
-                    <SortableItem
-                      sortable={sortable}
-                      index={index}
-                      style={[
-                        styles.celulaGrade,
-                        { width: tamanhoMiniatura, height: tamanhoMiniatura + 24 },
-                      ]}
-                      hoverDraggingStyle={styles.celulaGradeArrastando}
-                      renderHoverContent={({ dimensions }) => (
-                        // Cópia da foto que acompanha o dedo durante o arraste: tamanho explícito
-                        // (senão a miniatura com width '100%' pode colapsar e sumir) e borda de destaque.
-                        <View
-                          style={[
-                            styles.celulaGrade,
-                            styles.celulaGradeHover,
-                            {
-                              width: dimensions?.width ?? tamanhoMiniatura,
-                              height: dimensions?.height ?? tamanhoMiniatura + 24,
-                              margin: 0,
-                            },
-                          ]}
-                        >
-                          <Image
-                            source={{ uri: item.arquivo }}
-                            style={{ width: '100%', height: tamanhoMiniatura - 6 }}
-                            resizeMode="cover"
-                          />
-                          <Text style={styles.miniaturaLegenda} numberOfLines={1}>
-                            {item.legenda || '...'}
-                          </Text>
-                        </View>
-                      )}
+                onReorder={salvarNovaOrdem}
+                ListEmptyComponent={
+                  <Text style={styles.vazioTexto}>Nenhuma foto registrada!!!</Text>
+                }
+                renderItem={(item, { arrastando }) => (
+                  <View style={[styles.celulaGrade, arrastando && styles.celulaGradeArrastando]}>
+                    <Pressable
+                      style={styles.celulaGradeConteudo}
+                      onPress={() => abrirNaGrade(item)}
                     >
-                      <Pressable
-                        style={styles.celulaGradeConteudo}
-                        onPress={() => abrirNaGrade(item)}
-                      >
-                        <Image
-                          source={{ uri: item.arquivo }}
-                          style={[styles.miniatura, { height: tamanhoMiniatura }]}
-                        />
-                        <Text style={styles.miniaturaLegenda} numberOfLines={1}>
-                          {item.legenda || '...'}
-                        </Text>
-                      </Pressable>
-                    </SortableItem>
-                  )}
-                />
-              </SortableContainer>
+                      <Image
+                        source={{ uri: item.arquivo }}
+                        style={[styles.miniatura, { height: tamanhoMiniatura }]}
+                      />
+                      <Text style={styles.miniaturaLegenda} numberOfLines={1}>
+                        {item.legenda || '...'}
+                      </Text>
+                    </Pressable>
+                  </View>
+                )}
+              />
             </>
           )}
 
@@ -739,7 +693,6 @@ export default function FotosScreen() {
 
           <View style={{ paddingBottom: Math.max(insets.bottom, 10) }} />
         </KeyboardAvoidingView>
-      </DraxProvider>
     </GestureHandlerRootView>
   );
 }
@@ -854,6 +807,7 @@ const styles = StyleSheet.create({
     padding: 10,
   },
   celulaGrade: {
+    flex: 1,
     margin: 4,
     backgroundColor: '#fff',
     borderRadius: 8,
@@ -865,15 +819,12 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 1 },
   },
   celulaGradeArrastando: {
-    transform: [{ scale: 1.06 }],
-    shadowOpacity: 0.3,
-    shadowRadius: 10,
-    elevation: 6,
-  },
-  celulaGradeHover: {
     borderWidth: 3,
     borderColor: '#e8b93a',
     backgroundColor: '#fffbeb',
+    shadowOpacity: 0.35,
+    shadowRadius: 10,
+    elevation: 10,
   },
   celulaGradeConteudo: {
     flex: 1,
