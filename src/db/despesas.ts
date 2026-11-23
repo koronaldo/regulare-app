@@ -231,6 +231,46 @@ export interface ReciboParaTransferencia {
   nome_recibo: string;
   nm_despesa: string;
   comple: string;
+  /** Dados da despesa — o servidor grava em sinifoto pra despesa aparecer no itinerário. */
+  id_despesa: number;
+  qtde: string;
+  vlr_uni: string;
+  vlr_tot: string;
+  nro_despesa: string;
+  data_desp: string;
+}
+
+interface LinhaRecibo {
+  id_sinidesp: number;
+  nome_recibo: string | null;
+  nm_despesa: string;
+  comple: string | null;
+  id_despesa: number;
+  qtde: string | number | null;
+  vlr_uni: string | number | null;
+  vlr_tot: string | number | null;
+  nro_despesa: string | null;
+  data_desp: string | null;
+}
+
+const SELECT_RECIBO = `select sd.id_sinidesp, sd.nome_recibo, de.nm_despesa, sd.comple, sd.id_despesa,
+       sd.qtde, sd.vlr_uni, sd.vlr_tot, sd.nro_despesa, sd.data_desp
+     from sinidesp_iti sd
+     inner join despesa de on de.id_despesa = sd.id_despesa`;
+
+function paraRecibo(l: LinhaRecibo): ReciboParaTransferencia {
+  return {
+    id_sinidesp: l.id_sinidesp,
+    nome_recibo: l.nome_recibo ?? '',
+    nm_despesa: l.nm_despesa,
+    comple: l.comple ?? '',
+    id_despesa: l.id_despesa,
+    qtde: l.qtde != null ? String(l.qtde) : '',
+    vlr_uni: l.vlr_uni != null ? String(l.vlr_uni) : '',
+    vlr_tot: l.vlr_tot != null ? String(l.vlr_tot) : '',
+    nro_despesa: l.nro_despesa ?? '',
+    data_desp: l.data_desp ?? '',
+  };
 }
 
 /**
@@ -242,49 +282,20 @@ export interface ReciboParaTransferencia {
  */
 export async function listarRecibosParaTransferencia(idSinistro: number): Promise<ReciboParaTransferencia[]> {
   const db = await getDb();
-  const linhas = await db.getAllAsync<{
-    id_sinidesp: number;
-    nome_recibo: string | null;
-    nm_despesa: string;
-    comple: string | null;
-  }>(
-    `select sd.id_sinidesp, sd.nome_recibo, de.nm_despesa, sd.comple
-     from sinidesp_iti sd
-     inner join despesa de on de.id_despesa = sd.id_despesa
+  const linhas = await db.getAllAsync<LinhaRecibo>(
+    `${SELECT_RECIBO}
      where sd.id_sinistro = ? and sd.nome_recibo is not null and sd.nome_recibo <> ''
        and (sd.id_despeweb is null or sd.id_despeweb = 0)`,
     [idSinistro],
   );
-  return linhas.map((l) => ({
-    id_sinidesp: l.id_sinidesp,
-    nome_recibo: l.nome_recibo ?? '',
-    nm_despesa: l.nm_despesa,
-    comple: l.comple ?? '',
-  }));
+  return linhas.map(paraRecibo);
 }
 
 /** Busca um único comprovante (por id_sinidesp), pra transmitir individualmente — não filtra por já enviado, pra permitir reenvio. */
 export async function buscarReciboParaTransferencia(idSinidesp: number): Promise<ReciboParaTransferencia | null> {
   const db = await getDb();
-  const l = await db.getFirstAsync<{
-    id_sinidesp: number;
-    nome_recibo: string | null;
-    nm_despesa: string;
-    comple: string | null;
-  }>(
-    `select sd.id_sinidesp, sd.nome_recibo, de.nm_despesa, sd.comple
-     from sinidesp_iti sd
-     inner join despesa de on de.id_despesa = sd.id_despesa
-     where sd.id_sinidesp = ?`,
-    [idSinidesp],
-  );
-  if (!l) return null;
-  return {
-    id_sinidesp: l.id_sinidesp,
-    nome_recibo: l.nome_recibo ?? '',
-    nm_despesa: l.nm_despesa,
-    comple: l.comple ?? '',
-  };
+  const l = await db.getFirstAsync<LinhaRecibo>(`${SELECT_RECIBO} where sd.id_sinidesp = ?`, [idSinidesp]);
+  return l ? paraRecibo(l) : null;
 }
 
 export async function marcarReciboEnviado(idSinidesp: number): Promise<void> {

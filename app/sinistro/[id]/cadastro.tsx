@@ -842,6 +842,20 @@ export default function CadastroSinistroScreen() {
           />
         </Secao>
 
+        <Pressable
+          style={styles.botaoLocalizacao}
+          onPress={() => router.push({ pathname: '/sinistro/[id]/coordenadas', params: { id: String(idSinistro) } })}
+        >
+          <View style={styles.iconeLocalizacao}>
+            <Ionicons name="map" size={20} color="#fff" />
+          </View>
+          <View style={styles.flex1}>
+            <Text style={styles.botaoLocalizacaoTitulo}>Coordenadas do Sinistro</Text>
+            <Text style={styles.botaoLocalizacaoSub}>Capturar localização e enviar o print para o álbum de fotos</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color="#8a97a3" />
+        </Pressable>
+
         {corretora && (
           <Secao titulo="Dados da Corretora">
             <InfoLinha label="Nome" valor={corretora.nm_corretora} />
@@ -960,6 +974,36 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 15,
     fontWeight: '700',
+  },
+  botaoLocalizacao: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#dde3e8',
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    marginBottom: 14,
+  },
+  iconeLocalizacao: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#2a88ad',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  botaoLocalizacaoTitulo: {
+    color: '#1c3d5a',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  botaoLocalizacaoSub: {
+    color: '#8a97a3',
+    fontSize: 12,
+    marginTop: 2,
   },
   infoLinha: {
     marginBottom: 8,

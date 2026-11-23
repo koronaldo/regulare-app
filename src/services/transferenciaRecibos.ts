@@ -37,6 +37,14 @@ async function enviarRecibo(
         id_sinidesp: String(recibo.id_sinidesp),
         nm_despesa: recibo.nm_despesa,
         comple: recibo.comple,
+        // dados da despesa: sem eles o servidor não consegue levar o comprovante pro itinerário
+        // (despesas_retroativas_itinerario lê id_despesa/qtde/valores de sinifoto).
+        id_despesa: String(recibo.id_despesa),
+        qtde: recibo.qtde,
+        vlr_uni: recibo.vlr_uni,
+        vlr_tot: recibo.vlr_tot,
+        nro_despesa: recibo.nro_despesa,
+        data_desp: recibo.data_desp,
       },
     });
 
