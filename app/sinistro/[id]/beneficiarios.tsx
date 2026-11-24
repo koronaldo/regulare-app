@@ -531,10 +531,32 @@ export default function BeneficiariosScreen() {
               onChangeText={(v) => atualizarCampo('codban', v)}
               keyboardType="numeric"
             />
-            <Campo label="Agência" value={form.agencia} onChangeText={(v) => atualizarCampo('agencia', v)} />
-            <Campo label="Dígito Agência" value={form.digage} onChangeText={(v) => atualizarCampo('digage', v)} />
-            <Campo label="Conta" value={form.conta} onChangeText={(v) => atualizarCampo('conta', v)} />
-            <Campo label="Dígito Conta" value={form.digconta} onChangeText={(v) => atualizarCampo('digconta', v)} />
+            <View style={styles.linhaBancaria}>
+              <View style={styles.flex1}>
+                <Campo label="Agência" value={form.agencia} onChangeText={(v) => atualizarCampo('agencia', v)} />
+              </View>
+              <View style={styles.campoDigito}>
+                <Campo
+                  label="Dígito"
+                  value={form.digage}
+                  onChangeText={(v) => atualizarCampo('digage', v)}
+                  maxLength={3}
+                />
+              </View>
+            </View>
+            <View style={styles.linhaBancaria}>
+              <View style={styles.flex1}>
+                <Campo label="Conta" value={form.conta} onChangeText={(v) => atualizarCampo('conta', v)} />
+              </View>
+              <View style={styles.campoDigito}>
+                <Campo
+                  label="Dígito"
+                  value={form.digconta}
+                  onChangeText={(v) => atualizarCampo('digconta', v)}
+                  maxLength={3}
+                />
+              </View>
+            </View>
             <Selecao
               label="Tipo Conta"
               valor={form.id_tipoconta}
@@ -592,6 +614,13 @@ const styles = StyleSheet.create({
   },
   flex1: {
     flex: 1,
+  },
+  linhaBancaria: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  campoDigito: {
+    width: 80,
   },
   centro: {
     flex: 1,
