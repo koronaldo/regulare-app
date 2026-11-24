@@ -6,7 +6,16 @@ import { File } from 'expo-file-system';
 /** Intent.ACTION_VIEW do Android. */
 const ACTION_VIEW = 'android.intent.action.VIEW';
 /** Intent.FLAG_GRANT_READ_URI_PERMISSION: deixa o app leitor ler o arquivo privado do Regulare. */
-const FLAG_GRANT_READ_URI_PERMISSION = 1;
+const FLAG_GRANT_READ_URI_PERMISSION = 0x00000001;
+/**
+ * Intent.FLAG_ACTIVITY_NEW_TASK: o leitor abre na tarefa dele, fora da pilha do Regulare. Sem isso
+ * o leitor ficava "dentro" do app (startActivityForResult do expo-intent-launcher) e a promessa só
+ * resolvia quando o leitor fechava — telas com "processando" ficavam travadas e não dava pra
+ * alternar entre o PDF e o app. Com NEW_TASK o Android devolve na hora e a promessa resolve.
+ */
+const FLAG_ACTIVITY_NEW_TASK = 0x10000000;
+/** Intent.FLAG_ACTIVITY_NEW_DOCUMENT: cada arquivo aparece como janela própria nos recentes. */
+const FLAG_ACTIVITY_NEW_DOCUMENT = 0x00080000;
 
 const MIME_POR_EXTENSAO: Record<string, string> = {
   pdf: 'application/pdf',
@@ -29,8 +38,9 @@ export function mimeTypeDoArquivo(nomeArquivo: string, padrao = 'application/oct
  * Abre o documento direto no visualizador do aparelho (ex.: leitor de PDF), em vez da tela de
  * "compartilhar" que sugere aplicativos.
  *
- * - Android: dispara ACTION_VIEW com o content:// do arquivo. Se o usuário já tem um leitor
- *   padrão pra esse tipo, abre direto; se nenhum app souber abrir, cai no compartilhamento.
+ * - Android: dispara ACTION_VIEW com o content:// do arquivo, numa tarefa separada (o usuário
+ *   alterna entre o arquivo e o app pelos recentes). Se o usuário já tem um leitor padrão pra
+ *   esse tipo, abre direto; se nenhum app souber abrir, cai no compartilhamento.
  * - iOS: não existe "abrir com app padrão" para arquivo local; usa a pré-visualização do sistema
  *   (folha do expo-sharing, que mostra o documento).
  */
@@ -46,7 +56,7 @@ export async function abrirDocumento(uri: string, mimeType?: string): Promise<vo
       await IntentLauncher.startActivityAsync(ACTION_VIEW, {
         data: arquivo.contentUri,
         type: tipo,
-        flags: FLAG_GRANT_READ_URI_PERMISSION,
+        flags: FLAG_GRANT_READ_URI_PERMISSION | FLAG_ACTIVITY_NEW_TASK | FLAG_ACTIVITY_NEW_DOCUMENT,
       });
       return;
     } catch {
